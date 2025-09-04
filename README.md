@@ -3,11 +3,11 @@
 A cross-platform file sharing web application that makes file sharing across devices easier without using any internet. This works for multi-device file sharing across any two devices which are joined to the same network or one created hotspot, others joined. You can share files with Windows, Mac, iPhone, Linux simultaneously and fastly.
 
 ## ✨ Features
-- 🚀 **Cross-platform support** - Windows, Mac, iPhone, Linux
+- 🚀 **Cross-platform support** - Windows, Mac, iPhone, Linux,Android
 - 🌐 **No internet required** - Works on local network only
 - 📱 **Multi-device support** - Share files simultaneously across devices
 - 🔗 **Hotspot support** - Works with mobile hotspot connections
-- ⚡ **Fast P2P transfers** - Direct device-to-device connections
+- ⚡ **Fast transfers** - Direct device-to-device connections via host server.
 - 🔒 **Secure HTTPS** - Self-signed certificates for local network
 - 📊 **Real-time progress** - Live transfer progress updates
 - 🎯 **Simple PIN/QR workflow** - Easy device connection
@@ -49,6 +49,14 @@ A cross-platform file sharing web application that makes file sharing across dev
 2. **Grant admin privileges** when prompted (for certificate installation)
 3. **Wait for browser to open** automatically
 4. **Start sharing files!**
+5. if not worked with above then follow manual setup  # Install dependencies go to folder (after extracing) in that open terminal and type
+6.      #installing dependencies
+            cd backend
+            npm install
+            
+            # Start the server
+            node server.js
+
 
 ### macOS
 1. **Double-click `FileShare.command`**
@@ -242,10 +250,9 @@ FileShare_Project_8_clean/
 - **Self-signed certificates** - Provide transport encryption for local network
 - **No data collection** - All file transfers happen directly between devices
 - **No internet required** - Works completely offline on your local network
-- **Secure P2P transfers** - Files are transferred directly between devices
+- **Secure P2P transfers** - Files are transferred directly between devices using host server .
 
 ## 📊 Performance
-- **File size limit**: Up to 50GB per file
 - **Transfer speed**: Limited by your local network speed
 - **Concurrent transfers**: Multiple files can be transferred simultaneously
 - **Real-time progress**: Live progress updates for all transfers
@@ -262,7 +269,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 - Built with Node.js and Express
-- Uses WebRTC for P2P file transfers
+- Uses busboy
 - QR code generation with qrcode library
 - Cross-platform compatibility with native launchers
 
