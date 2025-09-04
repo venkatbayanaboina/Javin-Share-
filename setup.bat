@@ -63,14 +63,23 @@ echo => ✓ Dependencies installed successfully!
 echo => Press any key to continue with certificate generation...
 pause >nul
 
-if not exist "%BACKEND_DIR%\certs" mkdir "%BACKEND_DIR%\certs"
+echo => Creating certificates directory...
+if not exist "%BACKEND_DIR%\certs" (
+    mkdir "%BACKEND_DIR%\certs"
+    echo => ✓ Certificates directory created
+) else (
+    echo => ✓ Certificates directory already exists
+)
 
 :: Generate cert if missing (requires OpenSSL in PATH)
 if not exist "%BACKEND_DIR%\certs\cert.pem" (
+  echo => Checking for OpenSSL...
   if exist "%ProgramFiles%\Git\usr\bin\openssl.exe" (
     set OPENSSL="%ProgramFiles%\Git\usr\bin\openssl.exe"
+    echo => ✓ Found OpenSSL in Git for Windows
   ) else (
     set OPENSSL=openssl
+    echo => ⚠️ Using system OpenSSL (make sure it's installed)
   )
   echo => Generating self-signed certs (dev only) for IP: %DEVICE_IP%
   
@@ -100,7 +109,15 @@ if not exist "%BACKEND_DIR%\certs\cert.pem" (
   echo IP.1 = 127.0.0.1 >> "%BACKEND_DIR%\certs\cert.conf"
   echo IP.2 = %DEVICE_IP% >> "%BACKEND_DIR%\certs\cert.conf"
   
+  echo => Running OpenSSL command...
   %OPENSSL% req -x509 -newkey rsa:2048 -nodes -keyout "%BACKEND_DIR%\certs\key.pem" -out "%BACKEND_DIR%\certs\cert.pem" -days 365 -config "%BACKEND_DIR%\certs\cert.conf" -extensions v3_req
+  if %errorlevel% neq 0 (
+    echo => ERROR: OpenSSL certificate generation failed!
+    echo => Please make sure OpenSSL is installed correctly.
+    echo => Press any key to exit...
+    pause >nul
+    exit /b 1
+  )
   del "%BACKEND_DIR%\certs\cert.conf"
   echo => ✓ Certificates generated successfully!
   echo => Press any key to continue with certificate installation...
@@ -111,7 +128,18 @@ if not exist "%BACKEND_DIR%\certs\cert.pem" (
 if exist "%BACKEND_DIR%\certs\cert.pem" (
   echo => Installing/Trusting local HTTPS certificate
   certutil -addstore -f "Root" "%BACKEND_DIR%\certs\cert.pem" >nul 2>&1
-  echo => ✓ Certificate installed successfully!
+  if %errorlevel% neq 0 (
+    echo => ⚠️ Warning: Could not install certificate in trust store
+    echo => The app will still work but browser may show security warning
+  ) else (
+    echo => ✓ Certificate installed successfully!
+  )
+) else (
+  echo => ERROR: Certificate file not found!
+  echo => Certificate generation may have failed.
+  echo => Press any key to exit...
+  pause >nul
+  exit /b 1
 )
 
 echo.
