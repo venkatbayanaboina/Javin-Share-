@@ -60,8 +60,14 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 echo => ✓ Dependencies installed successfully!
+echo.
+echo ========================================
+echo    Moving to Certificate Generation
+echo ========================================
 echo => Press any key to continue with certificate generation...
 pause >nul
+echo => Continuing with certificate generation...
+echo.
 
 echo => Creating certificates directory...
 if not exist "%BACKEND_DIR%\certs" (
@@ -120,8 +126,10 @@ if not exist "%BACKEND_DIR%\certs\cert.pem" (
   )
   del "%BACKEND_DIR%\certs\cert.conf"
   echo => ✓ Certificates generated successfully!
-  echo => Press any key to continue with certificate installation...
-  pause >nul
+echo => Press any key to continue with certificate installation...
+pause >nul
+echo => Continuing with certificate installation...
+echo.
 )
 
 :: Trust the certificate if possible
