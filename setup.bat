@@ -34,7 +34,19 @@ if %errorlevel% NEQ 0 (
 
 echo => Installing backend dependencies...
 pushd "%BACKEND_DIR%"
+if not exist package.json (
+    echo => ERROR: package.json not found in backend directory!
+    echo => Please make sure you're running this from the correct location.
+    pause
+    exit /b 1
+)
 call npm install --silent
+if %errorlevel% neq 0 (
+    echo => ERROR: npm install failed!
+    echo => Please check if Node.js is installed correctly.
+    pause
+    exit /b 1
+)
 
 if not exist "%BACKEND_DIR%\certs" mkdir "%BACKEND_DIR%\certs"
 
@@ -103,6 +115,14 @@ echo => Press Ctrl+C to stop the server.
 echo.
 
 :: Start the server (this keeps the window open)
+cd "%BACKEND_DIR%"
+if not exist server.js (
+    echo => ERROR: server.js not found in backend directory!
+    echo => Please make sure you're running this from the correct location.
+    pause
+    exit /b 1
+)
+echo => Starting server from: %CD%
 node server.js
 
 popd
