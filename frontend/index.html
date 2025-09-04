@@ -1,0 +1,1286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FileShare - Host</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="header" style="box-shadow: 0 6px 15px #e9e3e361; border-radius: 20px; padding: 16px;">
+      <h1>🚀 JAVIN FileShare</h1>
+      <p>Share large files securely on your network</p>
+    </div>
+
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <p>Creating session...</p>
+    </div>
+
+    <div id="device-name-section" class="device-name-section" style="display:none;">
+      <div class="device-name-form" style="box-shadow: 0 8px 24px rgba(250, 247, 247, 0.993); border-radius: 16px; padding: 24px; text-align: center;">
+        <h3> Enter Your Device Name</h3>
+        <p style="margin-bottom: 20px; color: #fbfbfb;">This name will be used to identify your device in file transfers</p>
+        <div style="margin-bottom: 20px;">
+          <input type="text" id="device-name-input" placeholder="e.g., John's iPhone, Work Laptop" 
+                 style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 16px;"
+                 maxlength="30" />
+        </div>
+        <button id="continue-btn" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 16px;">
+          ➡️ Continue to Session
+        </button>
+      </div>
+    </div>
+    
+
+    <div id="host-section" class="host-section" style="display:none;">
+      <div class="qr-container" style="box-shadow: 0 8px 24px rgba(241, 240, 240, 0.912); border-radius: 16px; padding: 12px;">
+        <h2>🔗 Connect to Session</h2>
+        <div id="device-name-display" style="margin-bottom: 12px; padding: 8px; background: #f8f9fa00; border-radius: 8px; text-align: center;">
+          <strong>Device NAME:</strong> <span id="current-device-name">Loading...</span>
+        </div>
+        
+        <!-- QR Code Section -->
+        <div class="qr-section" style="margin-bottom: 16px;">
+          <h3 style="margin-bottom: 8px; color: #333;">📱 Scan QR Code</h3>
+          <div class="qr-code-wrapper">
+            <img id="qr-code" alt="QR Code" />
+          </div>
+        </div>
+        
+        <!-- Manual Entry Section -->
+        <div class="manual-entry-section" style="margin-bottom: 16px; padding: 12px; background: #f8f9fa; border-radius: 8px;">
+          <h3 style="margin-bottom: 8px;">
+            💻 <span style="color: #fa7b08;">Manual Entry (Desktop Users)</span>
+          </h3>
+          <div style="margin-bottom: 8px;">
+            <strong>URL:</strong> <code id="connection-url" style="background: #fff; padding: 4px 8px; border-radius: 4px; border: 1px solid #ddd;"></code>
+            <button id="copy-url-btn" class="btn-copy-small" style="margin-left: 8px;">📋</button>
+          </div>
+          <div style="font-size: 14px; color: #666;">
+            <strong>Instructions:</strong> Type the URL above in any browser, then enter the PIN below
+          </div>
+        </div>
+      </div>
+
+      <div class="pin-display" style="box-shadow: 0 8px 24px rgba(0,0,0,0.12); border-radius: 16px; padding: 12px;">
+        <div class="pin-label">🔐 Connection PIN</div>
+        <div class="pin-code" id="session-pin">000000</div>
+        <div class="pin-timer" id="pin-timer">PIN expires in: --:--</div>
+      </div>
+
+      <div id="connection-status" class="connection-status status-waiting">
+        <div><strong>⏳ Waiting for devices...</strong></div>
+      </div>
+
+      <div id="response-timer" class="timer-container" style="display: none;">
+        <div class="timer-label">Waiting for responses: <span id="countdown">30</span>s</div>
+        <div class="response-count">Responses: <span id="response-count">0</span>/<span id="total-receivers">0</span></div>
+      </div>
+
+      <div class="action-buttons" style="margin-top:16px;">
+        <button id="shutdown-btn" class="btn btn-exit"> 🛑 Shutdown Server</button>
+        <button id="reset-device-name-btn" class="btn btn-secondary">🔄 Change Device Name</button>
+      </div>
+    </div>
+    
+    <!-- Grace controls moved outside host section so they're always accessible -->
+    <div id="grace-controls" class="action-buttons" style="margin-top:20px; display:none; gap:8px; justify-content:center; background: #eeeded; border-radius: 20px; padding: 34px; box-shadow: 0 12px 30px rgba(237, 233, 237, 0.887); backdrop-filter: blur(0px); margin-bottom: 20px;">
+      <button id="go-now-btn" class="btn btn-primary">➡️ Go to Main immediately</button>
+      <button id="extend-btn" class="btn btn-secondary">⏱️ Extend 30s</button>
+      <span id="grace-countdown" style="margin-left:8px; font-weight:600; color: #667eea;">Redirecting in 30s…</span>
+    </div>
+    
+
+    
+
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+  <script>
+    // Comprehensive client-side guard to prevent direct navigation
+    (function() {
+      try {
+        const sid = getUrlParameter('session');
+        const role = getUrlParameter('role');
+        
+        // Check for navigation token first (for host access)
+        if (sid) {
+          const token = sessionStorage.getItem(`nav_token_index_${sid}`);
+          if (!token && role === 'host') {
+            document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Unauthorized Navigation</h2><p>Please start from the proper host flow.</p></div></div>';
+            throw new Error('Blocked direct navigation to index');
+          }
+          if (token) sessionStorage.removeItem(`nav_token_index_${sid}`);
+        }
+        
+        // Additional validation for non-host access
+        if (role && role !== 'host') {
+          document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Access Denied</h2><p>Only hosts can access this page.</p><p>Please scan the QR code to join as a client.</p></div></div>';
+          throw new Error('Non-host access denied');
+        }
+        
+        // Validate session exists if session parameter provided
+        if (sid) {
+          fetch(`/api/session-details/${sid}`)
+            .then(res => {
+              if (!res.ok) {
+                document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Session Not Found</h2><p>This session does not exist or has expired.</p><p>Please start a new session.</p></div></div>';
+                throw new Error('Session not found');
+              }
+            })
+            .catch(err => {
+              if (err.message !== 'Session not found') {
+                document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Invalid Session</h2><p>This session is not valid.</p><p>Please start a new session.</p></div></div>';
+              }
+              throw err;
+            });
+        }
+      } catch (e) { 
+        console.warn('Index page guard error:', e.message); 
+        return;
+      }
+    })();
+
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!window.FileShareUtils) {
+        document.body.innerHTML = `<div class='container'><div class='error'><h2>Critical Error</h2><p>Core script (script.js) failed to load. Please refresh the page.</p></div></div>`;
+        return;
+      }
+
+      const { getPeerId, showError, showNotification } = window.FileShareUtils;
+
+      let hostSocket;
+      let sessionData = null;
+      const peerId = getPeerId();
+      let pinTimerInterval;
+      let nonHostCount = 0;
+      let lastClientSeenAt = 0;
+      let isRestoringGraceTimer = false;
+
+      async function init() {
+        try {
+          // Clear any old session data when starting fresh
+          console.log('=== INIT FUNCTION CALLED ===');
+          console.log('Clearing old session data...');
+          
+          // Clear old session data from localStorage
+          const keysToRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('nav_hist_') || key.startsWith('exited_'))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(key => {
+            try { localStorage.removeItem(key); } catch (_) {}
+            console.log('Removed old session key:', key);
+          });
+          
+          // Check if there's a session parameter in URL
+          const urlParams = new URLSearchParams(window.location.search);
+          const sessionParam = urlParams.get('session');
+          
+          let url;
+          if (sessionParam) {
+            // If session parameter exists, try to get that specific session
+            url = `/get-current-session?session=${sessionParam}`;
+          } else {
+            // If no session parameter, check if we're refreshing or need a new session
+            const isRefresh = performance?.navigation?.type === performance?.navigation?.TYPE_RELOAD;
+            // Only force new if it's explicitly requested via URL parameter
+            const forceNewParam = urlParams.get('forceNew') === '1';
+            
+            if (isRefresh) {
+              // Page refresh - get current session
+              url = "/get-current-session?refresh=1";
+            } else {
+              // No session parameter and not refresh - create NEW session
+              // Use forceNew=1 to ensure a fresh session is created
+              url = "/get-current-session?forceNew=1";
+            }
+          }
+          
+          const resp = await fetch(url);
+          if (!resp.ok) {
+              const errData = await resp.json();
+              throw new Error(errData.error || "Failed to get session from server");
+          }
+          sessionData = await resp.json();
+          
+          console.log('=== BACKEND RESPONSE DEBUG ===');
+          console.log('Response URL:', url);
+          console.log('Response status:', resp.status);
+          console.log('Session data:', sessionData);
+          
+          // Check if this is a new session or existing session
+          if (url.includes('forceNew=1')) {
+            console.log('🆕 NEW SESSION CREATED (forceNew=1)');
+            // Don't start grace timer until a client actually joins
+            console.log('New session created - waiting for clients to join before starting grace timer');
+          } else if (url.includes('refresh=1')) {
+            console.log('🔄 EXISTING SESSION REUSED (refresh=1)');
+          } else if (url.includes('session=')) {
+            console.log('📋 SPECIFIC SESSION REQUESTED');
+          } else {
+            console.log('❓ UNKNOWN SESSION REQUEST TYPE');
+          }
+          
+          // Set navigation token for host access to index page
+          if (sessionData.sessionId) {
+            try {
+              sessionStorage.setItem(`nav_token_index_${sessionData.sessionId}`, '1');
+              // Initialize navigation history to 0 for this session
+              localStorage.setItem(`nav_hist_${sessionData.sessionId}`, '0');
+            } catch (_) {}
+          }
+          
+          // Connect to socket immediately so we can receive grace timer events
+          console.log('Connecting to socket immediately for grace timer events');
+          console.log('New session ID:', sessionData.sessionId);
+          setupSocket(sessionData.sessionId);
+          
+          // Guarded restoration: if a grace timer had started (post PIN verification), restore it on refresh
+          try {
+            const started = localStorage.getItem(`grace_started_${sessionData.sessionId}`) === '1';
+            const savedGraceTimer = localStorage.getItem(`grace_timer_${sessionData.sessionId}`);
+            if (started && savedGraceTimer) {
+              const graceData = JSON.parse(savedGraceTimer);
+              const elapsed = Math.floor((Date.now() - graceData.startTime) / 1000);
+              const remaining = Math.max(0, graceData.durationSeconds - elapsed);
+              if (remaining > 0) {
+                console.log('Grace timer restoration: remaining time:', remaining, 'seconds');
+                // If device-name screen is visible, defer until after name is entered
+                const deviceNameVisible = document.getElementById('device-name-section')?.style.display !== 'none';
+                const hostSectionVisible = document.getElementById('host-section')?.style.display !== 'none';
+                if (deviceNameVisible && !hostSectionVisible) {
+                  window.pendingGraceTimer = { durationSeconds: remaining, sessionId: sessionData.sessionId };
+                  console.log('Grace timer deferred until device name is entered');
+                } else {
+                  // Wait a bit for socket to be fully connected before restoring timer
+                  isRestoringGraceTimer = true;
+                  setTimeout(() => {
+                    window.timerRestored = true;
+                    window.startGraceTimer(remaining, sessionData.sessionId);
+                    console.log('Grace timer restored after socket connection');
+                    isRestoringGraceTimer = false;
+                  }, 500);
+                }
+              } else {
+                // Expired, clean up
+                console.log('Grace timer expired, cleaning up localStorage');
+                localStorage.removeItem(`grace_timer_${sessionData.sessionId}`);
+                localStorage.removeItem('redirectDeadline');
+                localStorage.removeItem(`grace_started_${sessionData.sessionId}`);
+              }
+            }
+          } catch (e) {
+            console.error('Error restoring grace timer:', e);
+          }
+          
+          // Do not restore grace timer on load; it should start only after a client verifies PIN
+          
+          // Check if device name already exists locally
+          const existingDeviceName = localStorage.getItem('device_name');
+          const isRefresh = performance?.navigation?.type === performance?.navigation?.TYPE_RELOAD;
+          const forceNew = urlParams.get('forceNew') === '1';
+          
+          console.log('=== DEVICE NAME CHECK DEBUG ===');
+          console.log('Existing device name:', existingDeviceName);
+          console.log('Is refresh:', isRefresh);
+          console.log('Force new:', forceNew);
+          console.log('URL params:', window.location.search);
+          
+          if (existingDeviceName) {
+            // Device name exists - always reuse it (regardless of forceNew)
+            console.log('✅ Device name found locally:', existingDeviceName);
+            console.log('✅ Reusing existing device name - going directly to session');
+            document.getElementById("loading").style.display = "none";
+            // Join session immediately with existing device name
+            joinSessionWithDeviceName(sessionData.sessionId, existingDeviceName);
+          } else {
+            // No device name - show input form
+            console.log('❌ No device name found - showing device name input');
+            document.getElementById("loading").style.display = "none";
+            document.getElementById("device-name-section").style.display = "block";
+          }
+        } catch (err) {
+          console.error(err);
+          showError("Couldn't create session: " + err.message);
+        }
+      }
+      
+      // Function to join session with existing device name
+      function joinSessionWithDeviceName(sessionId, deviceName) {
+        console.log('Joining session with existing device name:', deviceName);
+        // Store device name if not already stored
+        try { localStorage.setItem('device_name', deviceName); } catch (_) {}
+        
+        // Update device name in session (host is already joined)
+        if (hostSocket && hostSocket.connected) {
+          hostSocket.emit('update-device-name', { sessionId, deviceName });
+        } else {
+          console.log('Socket not connected yet, device name will be updated when connected');
+        }
+        
+        // Display the session
+        displaySession(sessionData);
+        
+          // Do not restore grace timer here; wait for server event after PIN verification
+      }
+        
+      function displaySession(s) {
+        document.getElementById("session-pin").textContent = s.pin;
+        document.getElementById("qr-code").src = s.qrDataUrl || "";
+        document.getElementById("connection-url").textContent = s.url || "Loading...";
+        // Display the device name
+        const deviceName = localStorage.getItem('device_name') || 'Unknown Device';
+        document.getElementById("current-device-name").textContent = deviceName;
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("device-name-section").style.display = "none";
+        document.getElementById("host-section").style.display = "block";
+        
+                  // Check if there's a saved PIN timer to restore
+          try {
+            const savedPinTimer = localStorage.getItem(`pin_timer_${s.sessionId}`);
+            if (savedPinTimer) {
+              const pinData = JSON.parse(savedPinTimer);
+              const remaining = Math.max(0, pinData.expiryTime - Date.now());
+              
+              if (remaining > 0) {
+                console.log(`Restoring PIN timer with ${Math.floor(remaining/1000)} seconds remaining`);
+                startPinTimer(pinData.expiryTime);
+              } else {
+                // Timer expired, clean up and use original expiry
+                localStorage.removeItem(`pin_timer_${s.sessionId}`);
+                startPinTimer(s.pinExpiry);
+              }
+            } else {
+              startPinTimer(s.pinExpiry);
+            }
+          } catch (_) {
+            startPinTimer(s.pinExpiry);
+          }
+          
+          // If an init()-deferred pending grace timer exists (restoration), start it now
+          if (window.pendingGraceTimer && window.pendingGraceTimer.sessionId === s.sessionId) {
+            isRestoringGraceTimer = true;
+            window.timerRestored = true;
+            window.startGraceTimer(window.pendingGraceTimer.durationSeconds, window.pendingGraceTimer.sessionId);
+            delete window.pendingGraceTimer;
+            isRestoringGraceTimer = false;
+          }
+      }
+
+      function startPinTimer(expiryTime) {
+          if (pinTimerInterval) clearInterval(pinTimerInterval);
+          const timerEl = document.getElementById('pin-timer');
+          
+          // Store PIN timer state for persistence across refreshes
+          try {
+            localStorage.setItem(`pin_timer_${sessionData?.sessionId}`, JSON.stringify({
+              expiryTime: expiryTime,
+              sessionId: sessionData?.sessionId
+            }));
+          } catch (_) {}
+
+          pinTimerInterval = setInterval(() => {
+              const remaining = Math.max(0, expiryTime - Date.now());
+              if (remaining === 0) {
+                  clearInterval(pinTimerInterval);
+                  timerEl.textContent = "PIN expired. Refreshing...";
+                  // Clean up saved PIN timer state
+                  try { localStorage.removeItem(`pin_timer_${sessionData?.sessionId}`); } catch (_) {}
+                  setTimeout(() => location.reload(), 2000);
+                  return;
+              }
+              const minutes = Math.floor(remaining / 60000);
+              const seconds = Math.floor((remaining % 60000) / 1000);
+              timerEl.textContent = `PIN expires in: ${minutes}:${String(seconds).padStart(2, '0')}`;
+          }, 1000);
+      }
+
+
+      
+      // Function to start grace timer (can be called from multiple places)
+      window.startGraceTimer = function(durationSeconds, sessionId) {
+        console.log('Starting grace timer:', durationSeconds, 'seconds for session:', sessionId);
+        
+        // Show grace controls
+        const controls = document.getElementById('grace-controls');
+        const label = document.getElementById('grace-countdown');
+        
+        if (controls && label) {
+          // Show the grace controls
+          controls.style.display = 'flex';
+          
+          // Clear any existing interval first
+          if (window.graceInterval) {
+            clearInterval(window.graceInterval);
+          }
+          
+          // Start the countdown
+          let remaining = durationSeconds || 30;
+          label.textContent = `Redirecting in ${remaining}s…`;
+          
+          window.graceInterval = setInterval(() => {
+            remaining -= 1;
+            label.textContent = `Redirecting in ${Math.max(0, remaining)}s…`;
+            
+            if (remaining <= 0) {
+              clearInterval(window.graceInterval);
+              controls.style.display = 'none';
+              // Redirect to main page with session parameters
+              if (sessionData && sessionData.sessionId) {
+                window.location.href = `/main.html?session=${sessionData.sessionId}&role=host&peerId=${peerId}`;
+              } else {
+                window.location.href = '/main.html';
+              }
+            }
+          }, 1000);
+          
+          // Store timer state for persistence (only if this is a new timer, not a restoration)
+          if (!window.timerRestored) {
+            try {
+              localStorage.setItem(`grace_timer_${sessionId}`, JSON.stringify({
+                startTime: Date.now(),
+                originalDuration: durationSeconds, // Track original duration
+                durationSeconds: durationSeconds,
+                sessionId: sessionId,
+                totalExtensions: 0, // No extensions yet
+                lastExtendedAt: null // Not extended yet
+              }));
+              // Mark that grace has officially started (post-verification)
+              localStorage.setItem(`grace_started_${sessionId}`, '1');
+              
+              // Also set the redirectDeadline for the new redirect timer system
+              const newDeadline = Date.now() + (durationSeconds * 1000);
+              localStorage.setItem("redirectDeadline", newDeadline);
+              console.log(`Set redirectDeadline to: ${newDeadline} (${durationSeconds} seconds from now)`);
+            } catch (_) {}
+          } else {
+            // This is a restoration - update redirectDeadline to match the restored timer
+            try {
+              const newDeadline = Date.now() + (durationSeconds * 1000);
+              localStorage.setItem("redirectDeadline", newDeadline);
+              console.log(`Restored redirectDeadline to: ${newDeadline} (${durationSeconds} seconds from now)`);
+            } catch (_) {}
+          }
+          
+          // Reset the restoration flag after starting the timer
+          window.timerRestored = false;
+        }
+      }
+      
+      // New redirect timer function that works with the grace timer system
+      function startRedirectTimer(extraSeconds = 30) {
+        // Check if we already have a saved redirect deadline
+        let deadline = localStorage.getItem("redirectDeadline");
+        
+        if (!deadline) {
+          // First time → set deadline
+          deadline = Date.now() + extraSeconds * 1000;
+          localStorage.setItem("redirectDeadline", deadline);
+        }
+        
+        function updateTimer() {
+          const remaining = Math.max(0, deadline - Date.now());
+          const seconds = Math.ceil(remaining / 1000);
+          
+          // Update the grace timer display
+          const label = document.getElementById('grace-countdown');
+          if (label) {
+            label.textContent = `Redirecting in ${seconds}s…`;
+          }
+          
+          if (remaining <= 0) {
+            localStorage.removeItem("redirectDeadline");
+            window.location.href = "/main.html"; // redirect
+          } else {
+            requestAnimationFrame(updateTimer);
+          }
+        }
+        
+        updateTimer();
+      }
+      
+      // Function to handle extend button timeout (prevent stuck buttons)
+      window.extendButtonTimeout = function(button) {
+        setTimeout(() => {
+          if (button && button.disabled) {
+            button.disabled = false;
+            button.textContent = '⏱️ Extend 30s';
+            console.log('Extend button timeout - re-enabled');
+          }
+        }, 10000); // 10 second timeout
+      }
+
+      function setupSocket(sessionId) {
+        console.log('=== SETUP SOCKET CALLED ===');
+        console.log('Session ID:', sessionId);
+        hostSocket = io();
+        
+        // Register event handlers IMMEDIATELY to avoid race conditions
+        console.log('Registering event handlers immediately...');
+        
+        // Handle grace timer events
+        hostSocket.on("start-host-redirect-countdown", (data) => {
+          console.log('=== GRACE TIMER EVENT RECEIVED ===');
+          console.log('Event data:', data);
+          console.log('Current session data:', sessionData);
+          console.log('Current peers:', Array.from(sessionData?.peers || []));
+          
+          const { durationSeconds } = data;
+          // Use current session ID if event doesn't provide one
+          const eventSessionId = data.sessionId || sessionData?.sessionId;
+          
+          // Show grace controls even if device name screen is visible (controls are outside host-section)
+          try {
+            const controls = document.getElementById('grace-controls');
+            if (controls) controls.style.display = 'flex';
+          } catch (_) {}
+          
+          // Check if this is an extension (we already have a timer running)
+          if (window.graceInterval) {
+            console.log('Extending existing grace timer');
+            console.log(`Current timer state: interval running, extending to ${durationSeconds} seconds`);
+            
+            // Clear existing timer
+            clearInterval(window.graceInterval);
+            
+            // Update the timer display
+            const label = document.getElementById('grace-countdown');
+            if (label) {
+              label.textContent = `Redirecting in ${durationSeconds}s…`;
+            }
+            
+            // Restart timer with new duration
+            let remaining = durationSeconds;
+            console.log(`Starting extended timer with ${remaining} seconds remaining`);
+            
+            window.graceInterval = setInterval(() => {
+              remaining -= 1;
+              if (label) {
+                label.textContent = `Redirecting in ${Math.max(0, remaining)}s…`;
+              }
+              
+              console.log(`Extended timer countdown: ${remaining}s remaining`);
+              
+              if (remaining <= 0) {
+                clearInterval(window.graceInterval);
+                const controls = document.getElementById('grace-controls');
+                if (controls) {
+                  controls.style.display = 'none';
+                }
+                // Redirect to main page
+                window.location.href = '/main.html';
+              }
+            }, 1000);
+            
+            // Store the extended timer state for persistence across refreshes
+            try {
+              // When extending a timer, preserve the original start time
+              // But calculate the TOTAL duration from original start + extensions
+              const currentTime = Date.now();
+              const existingTimer = localStorage.getItem(`grace_timer_${eventSessionId}`);
+              let totalExtensions = 0;
+              let originalStartTime = currentTime;
+              let totalDuration = durationSeconds;
+              
+              if (existingTimer) {
+                const existingData = JSON.parse(existingTimer);
+                totalExtensions = (existingData.totalExtensions || 0) + 1; // Track extensions
+                originalStartTime = existingData.startTime; // Keep original start time
+                
+                // Calculate how much time to add based on current remaining time
+                const currentTime2 = Date.now();
+                const elapsed = Math.floor((currentTime2 - existingData.startTime) / 1000);
+                const currentRemaining = Math.max(0, existingData.durationSeconds - elapsed);
+                
+                // Add the extension amount to the current remaining time
+                const extensionAmount = durationSeconds - currentRemaining; // How much time to add
+                totalDuration = existingData.durationSeconds + extensionAmount; // Add to current total
+                
+                console.log(`Extension calculation: elapsed=${elapsed}s, currentRemaining=${currentRemaining}s, adding=${extensionAmount}s, newTotal=${totalDuration}s`);
+              }
+              
+              const extendedTimerData = {
+                startTime: originalStartTime, // Keep original start time
+                originalDuration: existingTimer ? JSON.parse(existingTimer).originalDuration || 30 : 30, // Track original duration
+                durationSeconds: totalDuration, // TOTAL duration from original start
+                sessionId: eventSessionId,
+                totalExtensions: totalExtensions, // Track number of extensions
+                lastExtendedAt: currentTime // Track when it was last extended
+              };
+              
+              localStorage.setItem(`grace_timer_${eventSessionId}`, JSON.stringify(extendedTimerData));
+              // Keep started flag set during extensions
+              localStorage.setItem(`grace_started_${eventSessionId}`, '1');
+              console.log(`Extended timer saved to localStorage:`, extendedTimerData);
+              console.log(`Extended timer saved to localStorage: ${durationSeconds} seconds (extensions: ${totalExtensions})`);
+              
+              // Also update the redirectDeadline for the new redirect timer system
+              const newDeadline = Date.now() + (durationSeconds * 1000);
+              localStorage.setItem("redirectDeadline", newDeadline);
+              console.log(`Updated redirectDeadline to: ${newDeadline} (${durationSeconds} seconds from now)`);
+              
+              // Debug: Verify what was actually saved
+              const savedData = localStorage.getItem(`grace_timer_${eventSessionId}`);
+              console.log('Verification - what was actually saved:', savedData);
+              console.log('Parsed saved data:', JSON.parse(savedData));
+            } catch (_) {}
+            
+            // Re-enable the extend button
+            const extendBtn = document.getElementById('extend-btn');
+            if (extendBtn) {
+              extendBtn.disabled = false;
+              extendBtn.textContent = '⏱️ Extend 30s';
+            }
+            
+            showNotification(`Grace period extended to ${durationSeconds} seconds!`, "success");
+          } else {
+            // This is a new timer, not an extension
+            console.log('Starting new grace timer');
+            
+            // Store grace timer state for persistence across refreshes
+            try {
+              localStorage.setItem(`grace_timer_${eventSessionId}`, JSON.stringify({
+                startTime: Date.now(),
+                originalDuration: durationSeconds, // Track original duration
+                durationSeconds: durationSeconds,
+                sessionId: eventSessionId,
+                totalExtensions: 0, // No extensions yet
+                lastExtendedAt: null // Not extended yet
+              }));
+              // Mark that grace has officially started (post-verification)
+              localStorage.setItem(`grace_started_${eventSessionId}`, '1');
+              
+              // Also set the redirectDeadline for the new redirect timer system
+              const newDeadline = Date.now() + (durationSeconds * 1000);
+              localStorage.setItem("redirectDeadline", newDeadline);
+              console.log(`Set redirectDeadline to: ${newDeadline} (${durationSeconds} seconds from now)`);
+            } catch (_) {}
+            
+            // Start the grace timer
+            if (typeof window.startGraceTimer === 'function') {
+              window.startGraceTimer(durationSeconds, eventSessionId);
+            }
+          }
+        });
+
+        hostSocket.on("grace-timer-cleared", () => {
+          console.log('Grace timer cleared by server - hiding timer display');
+          if (window.graceInterval) {
+            clearInterval(window.graceInterval);
+            window.graceInterval = null;
+          }
+          const graceControls = document.getElementById('grace-controls');
+          if (graceControls) {
+            graceControls.style.display = 'none';
+          }
+          
+          // Clean up saved grace timer state
+          try {
+            localStorage.removeItem(`grace_timer_${sessionData?.sessionId}`);
+            localStorage.removeItem(`grace_started_${sessionData?.sessionId}`);
+          } catch (_) {}
+        });
+
+        // Handle server shutdown
+        hostSocket.on('server-shutdown', () => {
+          console.log('Server is shutting down - stopping all timers');
+          
+          // Stop PIN timer
+          if (pinTimerInterval) {
+            clearInterval(pinTimerInterval);
+            pinTimerInterval = null;
+          }
+          
+          // Stop grace timer
+          if (window.graceInterval) {
+            clearInterval(window.graceInterval);
+            window.graceInterval = null;
+          }
+          
+          // Update PIN timer display
+          const pinTimerEl = document.getElementById('pin-timer');
+          if (pinTimerEl) {
+            pinTimerEl.textContent = "Server shutting down...";
+          }
+          
+          // Hide grace controls
+          const graceControls = document.getElementById('grace-controls');
+          if (graceControls) {
+            graceControls.style.display = 'none';
+          }
+          
+          // Clean up localStorage
+          try {
+            localStorage.removeItem(`pin_timer_${sessionData?.sessionId}`);
+            localStorage.removeItem(`grace_timer_${sessionData?.sessionId}`);
+            localStorage.removeItem(`grace_started_${sessionData?.sessionId}`);
+            localStorage.removeItem('device_name');
+          } catch (_) {}
+          
+          // Show shutdown message
+          showNotification('Server is shutting down. This tab will attempt to close.', 'warning');
+          
+          // Attempt to close tab after a delay
+          setTimeout(() => {
+            try { window.close(); } catch (e) {}
+          }, 2000);
+        });
+
+        // Handle session ended
+        hostSocket.on('session-ended', () => {
+          console.log('Session ended - stopping all timers');
+          
+          // Stop PIN timer
+          if (pinTimerInterval) {
+            clearInterval(pinTimerInterval);
+            pinTimerInterval = null;
+          }
+          
+          // Stop grace timer
+          if (window.graceInterval) {
+            clearInterval(window.graceInterval);
+            window.graceInterval = null;
+          }
+          
+          // Update PIN timer display
+          const pinTimerEl = document.getElementById('pin-timer');
+          if (pinTimerEl) {
+            pinTimerEl.textContent = "Session ended";
+          }
+          
+          // Hide grace controls
+          const graceControls = document.getElementById('grace-controls');
+          if (graceControls) {
+            graceControls.style.display = 'none';
+          }
+          
+          // Clean up localStorage
+          try {
+            localStorage.removeItem(`pin_timer_${sessionData?.sessionId}`);
+            localStorage.removeItem(`grace_timer_${sessionData?.sessionId}`);
+            localStorage.removeItem(`grace_started_${sessionData?.sessionId}`);
+          } catch (_) {}
+          
+          // Show session ended message
+          showNotification('Session has ended. Refreshing page...', 'info');
+          
+          // Refresh page after a delay
+          setTimeout(() => {
+            location.reload();
+          }, 2000);
+        });
+        
+        // Handle socket disconnect (server shutdown)
+        hostSocket.on('disconnect', () => {
+          console.log('Socket disconnected - server may have shut down');
+          
+          // Stop PIN timer
+          if (pinTimerInterval) {
+            clearInterval(pinTimerInterval);
+            pinTimerInterval = null;
+          }
+          
+          // Stop grace timer
+          if (window.graceInterval) {
+            clearInterval(window.graceInterval);
+            window.graceInterval = null;
+          }
+          
+          // Update PIN timer display
+          const pinTimerEl = document.getElementById('pin-timer');
+          if (pinTimerEl) {
+            pinTimerEl.textContent = "Connection lost";
+          }
+          
+          // Hide grace controls
+          const graceControls = document.getElementById('grace-controls');
+          if (graceControls) {
+            graceControls.style.display = 'none';
+          }
+          
+          // Show connection lost message
+          showNotification('Connection to server lost. Server may have shut down.', 'error');
+        });
+
+        // Confirm when host successfully joins session
+        hostSocket.on("session-joined", (data) => {
+          console.log('🎯 HOST SESSION JOINED CONFIRMED');
+          console.log('Session join data:', data);
+          console.log('Socket ID:', hostSocket.id);
+          console.log('Session ID:', sessionData?.sessionId);
+        });
+        
+        hostSocket.on("connect", () => {
+          console.log('🎯 HOST SOCKET CONNECTED');
+          console.log('Socket ID:', hostSocket.id);
+          console.log('Socket connected:', hostSocket.connected);
+          console.log('Ready to receive grace timer events');
+          console.log('About to join session:', sessionId);
+          
+          // Join session immediately to receive grace timer events
+          const deviceName = localStorage.getItem('device_name') || 'Host Device';
+          console.log('Joining session immediately with device name:', deviceName);
+          hostSocket.emit('join-session', { 
+            sessionId, 
+            role: 'host', 
+            peerId, 
+            deviceName 
+          });
+          console.log('Join session event emitted');
+          
+          // Debug: Check if we can receive events
+          console.log('🎯 SOCKET CONNECTION DEBUG:');
+          console.log('Socket connected:', hostSocket.connected);
+          console.log('Socket ID:', hostSocket.id);
+          console.log('Grace controls element exists:', document.getElementById('grace-controls'));
+          console.log('Grace countdown element exists:', document.getElementById('grace-countdown'));
+        });
+        
+        hostSocket.on("disconnect", () => {
+          console.log('=== HOST SOCKET DISCONNECTED ===');
+        });
+        
+        hostSocket.on("connect_error", (error) => {
+          console.error('=== SOCKET CONNECTION ERROR ===', error);
+        });
+        
+        // Add a wildcard event listener to catch ALL events
+        hostSocket.onAny((eventName, ...args) => {
+          console.log('🎯 ANY SOCKET EVENT RECEIVED:', eventName, args);
+          console.log('Socket ID:', hostSocket.id);
+          console.log('Socket connected:', hostSocket.connected);
+        });
+        
+
+        
+
+        
+
+        
+
+
+        hostSocket.on("redirect-host-to-main", () => {
+          console.log('🚀 redirect-host-to-main event received!');
+          console.log('Session data:', sessionData);
+          console.log('Peer ID:', peerId);
+          
+          showNotification("Device connected! Redirecting...", "success");
+          
+          // Clear grace timer when redirecting to main
+          if (window.graceInterval) {
+            clearInterval(window.graceInterval);
+            const graceControls = document.getElementById('grace-controls');
+            if (graceControls) {
+              graceControls.style.display = 'none';
+            }
+            console.log('Grace timer cleared for redirect to main');
+          }
+          
+          // Emit an event to update the host's isMainPage flag before redirecting
+          console.log('Emitting host-going-to-main event...');
+          hostSocket.emit("host-going-to-main", { sessionId: sessionData?.sessionId });
+          
+          setTimeout(() => {
+              if (sessionData) {
+                  console.log('Redirecting to main page:', `/main.html?session=${sessionData.sessionId}&role=host&peerId=${peerId}`);
+                  window.location.href = `/main.html?session=${sessionData.sessionId}&role=host&peerId=${peerId}`;
+              } else {
+                  console.error('No session data available for redirect');
+              }
+          }, 1500);
+        });
+        
+        // Handle host-go-now response
+        hostSocket.on("host-go-now-response", (data) => {
+          console.log('Host go now response received:', data);
+          if (data && data.ok) {
+            showNotification("Redirecting to main page...", "success");
+            // The backend should emit redirect-host-to-main after this
+          } else {
+            showNotification(data?.message || "Failed to go to main page", "error");
+          }
+        });
+        
+        // Handle host-extend-redirect response
+        hostSocket.on("host-extend-redirect-response", (data) => {
+          console.log('Host extend redirect response received:', data);
+          if (data && data.ok) {
+            showNotification("Grace period extended by 30 seconds!", "success");
+            // Re-enable the extend button
+            const extendBtn = document.getElementById('extend-btn');
+            if (extendBtn) {
+              extendBtn.disabled = false;
+              extendBtn.textContent = '⏱️ Extend 30s';
+            }
+          } else {
+            showNotification(data?.message || "Failed to extend grace period", "error");
+            // Re-enable the extend button on failure
+            const extendBtn = document.getElementById('extend-btn');
+            if (extendBtn) {
+              extendBtn.disabled = false;
+              extendBtn.textContent = '⏱️ Extend 30s';
+            }
+          }
+        });
+        
+
+        
+
+
+        hostSocket.on("peers-updated", (peers) => {
+          console.log('Host received peers-updated:', peers);
+          const clients = peers.filter(p => p.role !== "host").length;
+          nonHostCount = clients;
+          if (clients > 0) {
+            lastClientSeenAt = Date.now();
+          }
+          
+          // Do NOT hide grace timer due to transient disconnects. Timer ends only on redirect or explicit clear.
+          console.log('Non-host count:', clients);
+          const status = document.getElementById("connection-status");
+          if (clients > 0) {
+            status.className = "connection-status status-success";
+            status.innerHTML = `<div><strong>🟢 ${clients} device(s) connected.</strong></div>`;
+          } else {
+            status.className = "connection-status status-waiting";
+            status.innerHTML = `<div><strong>⏳ Waiting for devices...</strong></div>`;
+          }
+          // Manage grace controls based on client count
+          if (window.graceInterval) {
+            const graceControls = document.getElementById('grace-controls');
+            if (graceControls) {
+              if (clients > 0) {
+                // Keep grace controls visible when clients are connected
+                graceControls.style.display = 'flex';
+                console.log('Clients connected, keeping grace timer visible');
+              } else if (!isRestoringGraceTimer) {
+                // Don't hide grace timer immediately on refresh - wait for server confirmation
+                // Only hide if we're sure there are no clients and timer should be cleared
+                console.log('No clients connected, but keeping grace timer visible until server confirms');
+              } else {
+                console.log('Grace timer is being restored, not hiding it');
+              }
+            }
+          }
+        });
+        
+        // Handle response timer events
+        hostSocket.on('response-timer-started', (data) => {
+          console.log('Response timer started:', data);
+          const timerContainer = document.getElementById('response-timer');
+          const countdownElement = document.getElementById('countdown');
+          const responseCountElement = document.getElementById('response-count');
+          const totalReceiversElement = document.getElementById('total-receivers');
+          
+          // Set initial values
+          countdownElement.textContent = '30';
+          responseCountElement.textContent = '0';
+          totalReceiversElement.textContent = data.totalReceivers;
+          
+          // Show timer container
+          timerContainer.style.display = 'block';
+          
+          // Start countdown
+          let secondsLeft = 30;
+          const countdownInterval = setInterval(() => {
+              secondsLeft--;
+              countdownElement.textContent = secondsLeft;
+              
+              if (secondsLeft <= 0) {
+                  clearInterval(countdownInterval);
+                  // Timer will be hidden when we receive response-count-updated with all responses
+              }
+          }, 1000);
+          
+          // Store interval ID to clear it if needed
+          window.responseTimerInterval = countdownInterval;
+        });
+        
+        hostSocket.on('response-count-updated', (data) => {
+          console.log('Response count updated:', data);
+          const responseCountElement = document.getElementById('response-count');
+          responseCountElement.textContent = data.totalResponses;
+          
+          // If all receivers have responded, hide the timer
+          if (data.totalResponses >= data.totalReceivers) {
+              document.getElementById('response-timer').style.display = 'none';
+              
+              // Clear interval if it exists
+              if (window.responseTimerInterval) {
+                  clearInterval(window.responseTimerInterval);
+                  window.responseTimerInterval = null;
+              }
+          }
+        });
+
+        // Grace timer is now handled in setupSocket function to work before device name is entered
+
+        // If sender cancels or exits, return host to main page
+        hostSocket.on('return-all-to-main', () => {
+          console.log('Host: Returning to main page due to sender cancellation');
+          window.location.href = `/main.html?session=${sessionData?.sessionId}&role=host`;
+        });
+
+        // When transfer is unlocked (completed, timed out, etc.), return host to main only if they have clients
+        hostSocket.on('transfer-unlocked', () => {
+          console.log('Host: Transfer unlocked');
+          // Only redirect if there are clients connected (nonHostCount > 0)
+          if (nonHostCount > 0) {
+            console.log('Host: Transfer unlocked, returning to main page');
+            window.location.href = `/main.html?session=${sessionData?.sessionId}&role=host`;
+          } else {
+            console.log('Host: Transfer unlocked but no clients connected, staying on index page');
+          }
+        });
+      }
+
+      document.getElementById("copy-url-btn").addEventListener("click", async () => {
+        const url = document.getElementById("connection-url").textContent;
+        
+        try {
+          // Try modern clipboard API first
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(url);
+            showNotification("URL copied to clipboard!", "success");
+          } else {
+            // Fallback for older browsers
+            const textArea = document.createElement("textarea");
+            textArea.value = url;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-999999px";
+            textArea.style.top = "-999999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            const successful = document.execCommand('copy');
+            document.body.removeChild(textArea);
+            
+            if (successful) {
+              showNotification("URL copied to clipboard!", "success");
+            } else {
+              showNotification("Failed to copy. Please select and copy manually.", "error");
+            }
+          }
+        } catch (err) {
+          console.error("Copy failed:", err);
+          showNotification("Copy failed. Please select and copy manually.", "error");
+        }
+      });
+
+      document.getElementById('shutdown-btn').addEventListener('click', async () => {
+        if (!confirm('Stop the server for everyone?')) return;
+        try {
+          // Clear device name when shutting down
+          try { localStorage.removeItem('device_name'); } catch (_) {}
+          // Inform clients to show message and try closing tabs
+          try { hostSocket?.emit('announce-shutdown'); } catch (e) {}
+          const resp = await fetch('/api/shutdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) });
+          if (resp.ok) {
+            alert('Server is stopping. This tab will attempt to close.');
+            try { window.close(); } catch (e) {}
+          } else {
+            showNotification('Failed to stop server.', 'error');
+          }
+        } catch (e) {
+          showNotification('Error stopping server.', 'error');
+        }
+      });
+
+      // Host controls: go now or extend grace period
+      document.getElementById('go-now-btn').addEventListener('click', () => {
+        console.log('Go to Main button clicked');
+        console.log('nonHostCount:', nonHostCount);
+        console.log('hostSocket connected:', hostSocket?.connected);
+        console.log('sessionData:', sessionData);
+        
+        // Check if socket is connected
+        if (!hostSocket || !hostSocket.connected) {
+          showNotification('Not connected to server. Please wait...', 'error');
+          return;
+        }
+        
+        // Check if session data exists
+        if (!sessionData || !sessionData.sessionId) {
+          showNotification('Session data not available. Please refresh the page.', 'error');
+          return;
+        }
+        
+        if (nonHostCount <= 0) {
+          showNotification('No clients connected yet. Please wait.', 'warning');
+          return;
+        }
+        
+        // Disable button to prevent multiple clicks
+        const goNowBtn = document.getElementById('go-now-btn');
+        goNowBtn.disabled = true;
+        goNowBtn.textContent = 'Redirecting...';
+        
+        try { 
+          console.log('Emitting host-go-now with sessionId:', sessionData.sessionId);
+          hostSocket.emit('host-go-now', { sessionId: sessionData.sessionId }, (ack) => {
+            console.log('host-go-now response:', ack);
+            if (!ack || !ack.ok) {
+              showNotification(ack?.message || 'No clients connected yet. Please wait.', 'warning');
+              // Re-enable button on failure
+              goNowBtn.disabled = false;
+              goNowBtn.textContent = '➡️ Go to Main immediately';
+            }
+          }); 
+        } catch (e) {
+          console.error('Error emitting host-go-now:', e);
+          showNotification('Error sending request. Please try again.', 'error');
+          // Re-enable button on error
+          goNowBtn.disabled = false;
+          goNowBtn.textContent = '➡️ Go to Main immediately';
+        }
+      });
+      document.getElementById('extend-btn').addEventListener('click', () => {
+        console.log('Extend button clicked');
+        console.log('hostSocket connected:', hostSocket?.connected);
+        console.log('sessionData:', sessionData);
+        
+        // Check if socket is connected
+        if (!hostSocket || !hostSocket.connected) {
+          showNotification('Not connected to server. Please wait...', 'error');
+          return;
+        }
+        
+        // Check if session data exists
+        if (!sessionData || !sessionData.sessionId) {
+          showNotification('Session data not available. Please refresh the page.', 'error');
+          return;
+        }
+        
+        // Check if grace timer is running
+        if (!window.graceInterval) {
+          showNotification('No grace timer running to extend.', 'warning');
+          return;
+        }
+        
+        // Disable button to prevent multiple clicks
+        const extendBtn = document.getElementById('extend-btn');
+        extendBtn.disabled = true;
+        extendBtn.textContent = 'Extending...';
+        
+        // Set timeout to re-enable button if no response
+        extendButtonTimeout(extendBtn);
+        
+        try { 
+          console.log('Emitting host-extend-redirect with sessionId:', sessionData.sessionId);
+          hostSocket.emit('host-extend-redirect', { sessionId: sessionData.sessionId }, (ack) => {
+            console.log('host-extend-redirect response:', ack);
+            if (!ack || !ack.ok) {
+              showNotification(ack?.message || 'Failed to extend grace period', 'error');
+              // Re-enable button on failure
+              extendBtn.disabled = false;
+              extendBtn.textContent = '⏱️ Extend 30s';
+            }
+          }); 
+        } catch (e) {
+          console.error('Error emitting host-extend-redirect:', e);
+          showNotification('Error sending request. Please try again.', 'error');
+          // Re-enable button on error
+          extendBtn.disabled = false;
+          extendBtn.textContent = '⏱️ Extend 30s';
+        }
+      });
+      
+      // Reset device name button
+      document.getElementById('reset-device-name-btn').addEventListener('click', () => {
+        if (confirm('Change your device name? This will require you to enter a new name.')) {
+          try {
+            localStorage.removeItem('device_name');
+            // Show device name input section again
+            document.getElementById("host-section").style.display = "none";
+            document.getElementById("device-name-section").style.display = "block";
+            // Clear the input field
+            document.getElementById("device-name-input").value = "";
+            // Focus on the input
+            document.getElementById("device-name-input").focus();
+          } catch (_) {}
+        }
+      });
+
+      // Device name input handling
+      document.getElementById('continue-btn').addEventListener('click', () => {
+        const deviceNameInput = document.getElementById('device-name-input');
+        const deviceName = deviceNameInput.value.trim();
+        
+        if (!deviceName) {
+          showNotification('Please enter a device name', 'error');
+          deviceNameInput.focus();
+          return;
+        }
+        
+        if (deviceName.length > 30) {
+          showNotification('Device name must be 30 characters or less', 'error');
+          deviceNameInput.focus();
+          return;
+        }
+        
+        // Clear any existing device name and save new one
+        try {
+          localStorage.removeItem('device_name');
+          localStorage.setItem('device_name', deviceName);
+        } catch (_) {}
+        
+        // Update the display immediately
+        updateDeviceNameDisplay(deviceName);
+        
+        // Show session
+        displaySession(sessionData);
+        
+                                    // Update device name in session (host is already joined)
+          if (hostSocket && hostSocket.connected) {
+            console.log('Updating device name in session:', deviceName);
+            hostSocket.emit("update-device-name", { 
+              sessionId: sessionData.sessionId, 
+              deviceName: deviceName 
+            });
+            
+            // Check if there's a pending grace timer to replay
+            if (window.pendingGraceTimer) {
+              console.log('Replaying pending grace timer after updating device name:', window.pendingGraceTimer);
+              const { durationSeconds, sessionId } = window.pendingGraceTimer;
+              window.startGraceTimer(durationSeconds, sessionId);
+              delete window.pendingGraceTimer;
+            }
+          } else {
+            console.error('Socket not connected when trying to update device name');
+          }
+      });
+      
+      // Function to update device name display in real-time
+      function updateDeviceNameDisplay(deviceName) {
+        const displayElement = document.getElementById("current-device-name");
+        if (displayElement) {
+          displayElement.textContent = deviceName;
+        }
+      }
+
+      // Allow Enter key to submit device name
+      document.getElementById('device-name-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          document.getElementById('continue-btn').click();
+        }
+      });
+
+      // Debug: Check if grace controls exist and test their display
+      console.log('Grace controls element exists:', document.getElementById('grace-controls'));
+      console.log('Grace countdown element exists:', document.getElementById('grace-countdown'));
+      
+
+      
+      init();
+    });
+  </script>
+</body>
+</html>

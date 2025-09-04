@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FileShare - Send</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>📤 Send Files</h1></div>
+    <div class="session-info"><strong>Session:</strong> <span id="sessionId"></span></div>
+    <div id="devicesStatus">Connected: --</div>
+
+    <div class="file-drop-zone" id="fileDropZone">
+      <div><h3>📁 Drop a file or click to browse</h3><p>Up to 50GB</p></div>
+      <input type="file" id="fileInput" style="display:none;" multiple />
+    </div>
+
+    <div id="selectedFiles" class="selected-files"></div>
+    <button id="sendBtn" class="send-button" disabled>📤 Request to Send</button>
+    <div id="response-timer" class="timer-container" style="display:none;">
+      <div class="timer-label">Waiting for responses: <span id="timer-count">30</span>s</div>
+      <div class="response-count">Responses: <span id="response-count">0</span>/<span id="total-receivers">0</span></div>
+      <div class="action-buttons" style="margin-top:8px;">
+        <button id="extend-response-btn" class="btn btn-secondary">⏱️ Extend 30s</button>
+        <button id="manual-proceed-btn" class="btn btn-primary">➡️ Proceed Manually</button>
+      </div>
+    </div>
+
+    <!-- 🆕 NEW: No receivers waiting notification -->
+    <div id="no-receivers-notification" class="timer-container" style="display:none; background-color: #fff3cd; border-color: #ffeaa7;">
+      <div class="timer-label">⚠️ No Receivers Waiting</div>
+      <div style="margin-top:8px;">
+        <button onclick="goBack()" class="btn btn-secondary">← Go Back to Main</button>
+      </div>
+    </div>
+
+    <button onclick="goBack()" class="back-button">← Back</button>
+
+    <div id="upload-section" style="display:none;">
+      <h3 id="upload-title">Uploading...</h3>
+      <div id="upload-list"></div>
+      <div id="upload-stats" class="stats-row" style="margin-top:8px;"></div>
+    </div>
+
+    
+
+    <div id="send-history" class="file-list" style="display:none; margin-top:16px;">
+      <h3>📋 Recent Sent Files</h3>
+      <div id="send-history-content"></div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+  <script>
+    // Comprehensive client-side guard to prevent direct navigation
+    (function(){
+      try {
+        const sid = getUrlParameter('session');
+        const role = getUrlParameter('role');
+        
+        // Check for navigation token first
+        const token = sessionStorage.getItem(`nav_token_send_${sid}`);
+        const allowReload = sessionStorage.getItem(`allow_reload_send_${sid}`) === '1';
+        if (!token && !allowReload) {
+          document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Unauthorized Navigation</h2><p>Please start from the main page.</p></div></div>';
+          throw new Error('Blocked direct navigation to send');
+        }
+        if (token) sessionStorage.removeItem(`nav_token_send_${sid}`);
+        
+        // Additional validation
+        if (!sid || !role) {
+          document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Invalid Access</h2><p>Missing session or role information.</p><p>Please start from the main page.</p></div></div>';
+          throw new Error('Missing session or role');
+        }
+        
+        // Validate session exists
+        fetch(`/api/session-details/${sid}`)
+          .then(res => {
+            if (!res.ok) {
+              document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Session Not Found</h2><p>This session does not exist or has expired.</p><p>Please scan a new QR code.</p></div></div>';
+              throw new Error('Session not found');
+            }
+          })
+          .catch(err => {
+            if (err.message !== 'Session not found') {
+              document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Invalid Session</h2><p>This session is not valid.</p><p>Please scan the QR code again.</p></div></div>';
+            }
+            throw err;
+          });
+      } catch (e) { 
+        console.warn('Send page guard error:', e.message); 
+        return;
+      }
+    })();
+    const sessionId = getUrlParameter("session");
+    const role = getUrlParameter("role");
+    const peerId = getPeerId();
+    let sendSocket;
+    let selectedFile = null;
+    let selectedQueue = [];
+    let currentFileId = null;
+    let isRequesting = false;
+    
+
+    document.getElementById("sessionId").textContent = sessionId;
+
+    // Replace the setupSocket function in send.html with this fixed version:
+
+// Replace the setupSocket function in send.html with this fixed version:
+
+function setupSocket() {
+  sendSocket = io();
+  
+  sendSocket.on("connect", () => {
+    console.log("Socket connected, joining session...");
+    let deviceName = '';
+    try { deviceName = localStorage.getItem('device_name') || ''; } catch (_) {}
+    sendSocket.emit("join-session", { sessionId, role, peerId, deviceName });
+    
+    // 🆕 NEW: Notify server that we're entering send page (with small delay to ensure peer state is set)
+    setTimeout(() => {
+      sendSocket.emit("enter-send-page", { sessionId, peerId });
+    }, 100);
+  });
+
+  sendSocket.on("session-joined", (data) => {
+    console.log("Session joined successfully:", data);
+  });
+
+  async function refreshRecent() {
+    try {
+      const resp = await fetch(`/recent/${peerId}`);
+      const data = await resp.json();
+      const container = document.getElementById('send-history');
+      const content = document.getElementById('send-history-content');
+      const sent = (data || []).filter(t => t.senderId === peerId);
+      if (!sent.length) { container.style.display = 'none'; return; }
+      // Group by file (name + approx time bucket)
+      const grouped = new Map();
+      for (const row of sent) {
+        const timeBucket = Math.floor(row.timestamp / 10000); // 10s bucket to group same send
+        const key = `${row.fileName}|${row.size}|${timeBucket}`;
+        if (!grouped.has(key)) {
+          grouped.set(key, { fileName: row.fileName, size: row.size, timestamp: row.timestamp, receivers: [] });
+        }
+        const g = grouped.get(key);
+        g.timestamp = Math.max(g.timestamp, row.timestamp);
+        g.receivers.push(row.receiverName || row.receiverId || '');
+      }
+      const rows = Array.from(grouped.values()).sort((a,b)=>b.timestamp-a.timestamp);
+      container.style.display = 'block';
+      content.innerHTML = rows.map((g, idx) => `
+        <div class="history-item">
+          <div class="history-info">
+            <strong>${idx + 1}. ${escapeHtml(g.fileName)}</strong>
+            <div class="history-details">
+              <span>Size: ${formatFileSize(g.size)}</span>
+              <span>Sent to: ${escapeHtml(g.receivers.filter(Boolean).join(', '))}</span>
+              <span>${new Date(g.timestamp).toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    } catch (_) {}
+  }
+  sendSocket.on('history-updated', () => { refreshRecent(); });
+
+  // 🆕 NEW: Handle abandoned sender redirect (in case sender is redirected)
+  sendSocket.on('redirect-to-main-due-to-abandoned-sender', (data) => {
+    console.log('Send page: Abandoned sender detected, redirecting to main page:', data);
+    showNotification('You have been redirected to main page due to abandoned sender scenario.', 'warning');
+    
+    // Notify server that we're leaving send page
+    if (sendSocket && sendSocket.connected) {
+      sendSocket.emit('leave-send-page', { sessionId, peerId });
+    }
+    
+    // Redirect to main page
+    setTimeout(() => {
+      window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+    }, 1000);
+  });
+
+  // 🆕 NEW: Handle sender left send page redirect
+  sendSocket.on('redirect-to-main-due-to-sender-left-send-page', (data) => {
+    console.log('Send page: Sender left send page, redirecting to main page:', data);
+    showNotification('The sender has left the send page. Redirecting to main page.', 'info');
+    
+    // Notify server that we're leaving send page
+    if (sendSocket && sendSocket.connected) {
+      sendSocket.emit('leave-send-page', { sessionId, peerId });
+    }
+    
+    // Redirect to main page
+    setTimeout(() => {
+      window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+    }, 1000);
+  });
+
+  // 🆕 NEW: Handle redirect to main page when no receivers are waiting
+  sendSocket.on('redirect-to-main-due-to-no-receivers', (data) => {
+    console.log('Send page: No receivers waiting, redirecting to main page:', data);
+    showNotification('No receivers are waiting. Redirecting to main page.', 'info');
+    
+    // Notify server that we're leaving send page
+    if (sendSocket && sendSocket.connected) {
+      sendSocket.emit('leave-send-page', { sessionId, peerId });
+    }
+    
+    // Redirect to main page
+    setTimeout(() => {
+      window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+    }, 1000);
+  });
+  sendSocket.on('redirect-sender-to-main-no-receivers', (data) => {
+    console.log('Send page: Redirecting to main page - no receivers waiting:', data);
+    showNotification('No receivers are currently waiting. Redirecting you to main page.', 'info');
+    
+    // Redirect to main page
+    setTimeout(() => {
+      window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+    }, 1000);
+  });
+
+  // 🆕 NEW: Handle redirect back to receive page (sender shouldn't get this, but just in case)
+  sendSocket.on('redirect-back-to-receive', (data) => {
+    console.log('Send page: Ignoring redirect back to receive (sender is in send page):', data);
+  });
+
+  // 🆕 NEW: Handle host navigation blocked (sender shouldn't get this, but just in case)
+  sendSocket.on('host-navigation-blocked', (data) => {
+    console.log('Send page: Ignoring host navigation blocked event (sender is in send page):', data);
+  });
+
+  // 🆕 NEW: Handle host navigation allowed (sender shouldn't get this, but just in case)
+  sendSocket.on('host-navigation-allowed', (data) => {
+    console.log('Send page: Ignoring host navigation allowed event (sender is in send page):', data);
+  });
+
+  // 🆕 NEW: Handle automatic redirect to receive page when send button is locked
+  sendSocket.on('auto-redirect-to-receive', (data) => {
+    console.log('Send page: Ignoring auto-redirect (sender is in send page):', data);
+  });
+
+  // 🆕 NEW: Handle send button locked notification
+  sendSocket.on('send-button-locked', (data) => {
+    console.log('Send page: Send button locked:', data);
+    showNotification('Send button is now locked. You are the active sender.', 'info');
+  });
+
+  // 🆕 NEW: Handle send button unlocked notification
+  sendSocket.on('send-button-unlocked', (data) => {
+    console.log('Send page: Send button unlocked:', data);
+    showNotification('Send button is now unlocked. You can continue sending files.', 'info');
+  });
+
+  sendSocket.on("peers-updated", (peers) => {
+    console.log("Peers updated:", peers);
+    const others = peers.filter(p => p.peerId !== peerId);
+    const receiversCount = others.length; // Anyone else can be a receiver
+    
+    document.getElementById("devicesStatus").textContent = `Connected to ${others.length} other device(s) (${receiversCount} potential receivers)`;
+    
+    const sendBtn = document.getElementById("sendBtn");
+    sendBtn.disabled = receiversCount === 0 || !selectedFile || isRequesting;
+    sendBtn.textContent = receiversCount === 0 ? '📤 No Receivers Available' : '📤 Request to Send';
+
+    // If host is alone here, prompt to shut down or go back to index
+    try {
+      const myRole = getUrlParameter('role');
+      if (myRole === 'host' && receiversCount === 0) {
+        // Double-check with server before showing shutdown prompt
+        setTimeout(async () => {
+          try {
+            const response = await fetch(`/api/session-details/${sessionId}`);
+            if (response.ok) {
+              const sessionData = await response.json();
+              // Only show shutdown prompt if we're actually alone
+              if (sessionData.peerCount <= 1) {
+                if (!confirm('You are alone in this session. Do you want to shut down the server?')) {
+                  window.location.href = '/?forceNew=1';
+                } else {
+                  try { await fetch('/api/shutdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) }); } catch (_) {}
+                }
+              }
+            }
+          } catch (_) {
+            // If we can't check server, don't show shutdown prompt
+          }
+        }, 1000); // Increased delay to allow for peer updates
+      }
+    } catch (_) {}
+  });
+
+  // Listen for approval from the server
+  sendSocket.on("send-approved", ({ fileId }) => {
+    console.log("Send approved for fileId:", fileId);
+    if (fileId === currentFileId) {
+        showNotification("Request approved! Waiting for receiver to accept...", "info");
+    }
+  });
+  
+  // Handle response timer events
+  sendSocket.on("response-timer-started", ({ fileId, duration, totalReceivers }) => {
+    console.log("Send page: Response timer started", { fileId, duration, totalReceivers, currentFileId });
+    if (fileId === currentFileId) {
+      // Show the timer container
+      const timerContainer = document.getElementById("response-timer");
+      timerContainer.style.display = "block";
+      
+      // Set the total receivers count
+      document.getElementById("total-receivers").textContent = totalReceivers;
+      document.getElementById("response-count").textContent = "0";
+      
+      // Start the countdown
+      let timeLeft = duration;
+      document.getElementById("timer-count").textContent = timeLeft;
+      
+      // Clear any existing timer
+      if (window.responseCountdown) clearInterval(window.responseCountdown);
+      
+      // Set up the countdown timer
+      window.responseCountdown = setInterval(() => {
+        timeLeft--;
+        document.getElementById("timer-count").textContent = timeLeft;
+        
+        if (timeLeft <= 0) {
+          clearInterval(window.responseCountdown);
+          timerContainer.style.display = "none";
+        }
+      }, 1000);
+      // Extend button
+      const extendBtn = document.getElementById('extend-response-btn');
+      extendBtn.onclick = () => {
+        try { sendSocket.emit('extend-response-timer', { sessionId, fileId, senderId: peerId }); } catch (_) {}
+      };
+      // Manual proceed button
+      const manualBtn = document.getElementById('manual-proceed-btn');
+      manualBtn.onclick = () => {
+        try { sendSocket.emit('manual-proceed', { sessionId, fileId, senderId: peerId }); } catch (_) {}
+      };
+    }
+  });
+  
+  // Handle response count updates
+  sendSocket.on("response-count-updated", ({ fileId, totalResponses, totalReceivers }) => {
+    console.log("Send page: Response count updated", { fileId, totalResponses, totalReceivers, currentFileId });
+    if (fileId === currentFileId) {
+      document.getElementById("response-count").textContent = totalResponses;
+      document.getElementById("total-receivers").textContent = totalReceivers;
+      
+      // If all receivers have responded, hide the timer
+      if (totalResponses >= totalReceivers) {
+        clearInterval(window.responseCountdown);
+        document.getElementById("response-timer").style.display = "none";
+      }
+    }
+  });
+
+  // Start upload only after at least one receiver accepted
+  sendSocket.on('start-upload', ({ fileId }) => {
+    if (fileId === currentFileId) {
+      // Hide response timer when proceeding to upload
+      try { if (window.responseCountdown) clearInterval(window.responseCountdown); } catch (_) {}
+      try { document.getElementById('response-timer').style.display = 'none'; } catch (_) {}
+      showNotification("Receiver accepted. Starting upload...", "success");
+      startUpload(fileId);
+    }
+  });
+
+  // Listen for rejection from the server
+  sendSocket.on("send-rejected", ({ fileId, reason }) => {
+    console.log("Send rejected:", { fileId, reason });
+    if (fileId === currentFileId) {
+      showNotification("Send request rejected: " + reason + ". Please try again.", "error");
+      // Reset state but don't show error page
+      currentFileId = null;
+      isRequesting = false;
+      const sendBtn = document.getElementById("sendBtn");
+      sendBtn.disabled = !selectedFile;
+      sendBtn.textContent = '📤 Request to Send';
+    }
+  });
+  
+  sendSocket.on("transfer-unlocked", () => {
+      console.log("Transfer unlocked");
+      showNotification("Ready to send a new file.", "info");
+      isRequesting = false;
+      document.getElementById("sendBtn").disabled = !selectedFile;
+      document.getElementById("sendBtn").textContent = '📤 Request to Send';
+  });
+
+  // If receiver rejects, just show notification but wait for all responses
+  sendSocket.on('receiver-rejected', ({ fileId, receiverPeerId }) => {
+    if (fileId !== currentFileId) return;
+    showNotification(`Receiver ${receiverPeerId.substring(0,6)} rejected the file. Waiting for other responses...`, "warning");
+    // Don't move to next file yet - wait for all responses or timer expiry
+  });
+
+  // If all receivers rejected the offer
+  sendSocket.on('all-rejected', ({ fileId }) => {
+    if (fileId !== currentFileId) return;
+    // Hide response timer when all rejected
+    try { if (window.responseCountdown) clearInterval(window.responseCountdown); } catch (_) {}
+    try { document.getElementById('response-timer').style.display = 'none'; } catch (_) {}
+    showNotification("All receivers rejected. Skipping to next file.", "warning");
+    
+    // Move to next file in queue
+    if (selectedQueue.length > 0) {
+      selectedQueue.shift();
+      selectedFile = selectedQueue[0] || null;
+      renderSelectedList();
+      
+      // Automatically request to send the next file
+      if (selectedFile) {
+        setTimeout(() => {
+          requestToSendFile();
+        }, 1000); // Small delay before sending next request
+      }
+    } else {
+      selectedFile = null;
+    }
+    currentFileId = null;
+    isRequesting = false;
+    const sendBtn = document.getElementById("sendBtn");
+    sendBtn.disabled = !selectedFile;
+    sendBtn.textContent = '📤 Request to Send';
+  });
+
+  // If no one accepted within time window
+  sendSocket.on('offer-timeout', ({ fileId }) => {
+    if (fileId !== currentFileId) return;
+    // Hide response timer when timeout occurs
+    try { if (window.responseCountdown) clearInterval(window.responseCountdown); } catch (_) {}
+    try { document.getElementById('response-timer').style.display = 'none'; } catch (_) {}
+    showNotification("No response in time. Moving to next file.", "warning");
+    
+    // Move to next file in queue
+    if (selectedQueue.length > 0) {
+      selectedQueue.shift();
+      selectedFile = selectedQueue[0] || null;
+      renderSelectedList();
+      
+      // Automatically request to send the next file
+      if (selectedFile) {
+        setTimeout(() => {
+          requestToSendFile();
+        }, 1000); // Small delay before sending next request
+      }
+    } else {
+      selectedFile = null;
+    }
+    currentFileId = null;
+    isRequesting = false;
+    const sendBtn = document.getElementById("sendBtn");
+    sendBtn.disabled = !selectedFile;
+    sendBtn.textContent = '📤 Request to Send';
+  });
+
+  sendSocket.on("disconnect", () => {
+    console.log("Socket disconnected");
+  });
+  // Recent updates push
+  sendSocket.on('recent-updated', () => { try { refreshRecent(); } catch (_) {} });
+}
+// Initial recent fetch after socket setup
+setTimeout(() => { try { refreshRecent(); } catch (_) {} }, 500);
+    document.getElementById("fileDropZone").addEventListener("click", () => document.getElementById("fileInput").click());
+    document.getElementById("fileInput").addEventListener("change", (e) => {
+      if (!e.target.files.length) return;
+      // Append new files to the existing queue instead of replacing
+      const newFiles = Array.from(e.target.files);
+      selectedQueue = [...selectedQueue, ...newFiles];
+      selectedFile = selectedQueue[0] || null;
+      renderSelectedList();
+    });
+
+    // Prevent default browser behavior for drag & drop (which may open/download files)
+    const dropZone = document.getElementById("fileDropZone");
+    ['dragenter','dragover','dragleave','drop'].forEach(evt => {
+      window.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); });
+      dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); });
+    });
+    ['dragenter','dragover'].forEach(evt => {
+      dropZone.addEventListener(evt, () => { dropZone.classList.add('drag-over'); });
+    });
+    ['dragleave','drop'].forEach(evt => {
+      dropZone.addEventListener(evt, () => { dropZone.classList.remove('drag-over'); });
+    });
+    dropZone.addEventListener('dragover', (e) => { if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; });
+    dropZone.addEventListener('drop', (e) => {
+      const files = Array.from(e.dataTransfer?.files || []);
+      if (!files.length) return;
+      selectedQueue = files;
+      selectedFile = selectedQueue[0] || null;
+      renderSelectedList();
+    });
+
+    function renderSelectedList() {
+      const el = document.getElementById("selectedFiles");
+      const sendBtn = document.getElementById("sendBtn");
+      if (!selectedQueue.length) {
+        el.innerHTML = "";
+        sendBtn.disabled = true;
+        // If queue became empty, ensure response timer UI is hidden
+        try { if (window.responseCountdown) clearInterval(window.responseCountdown); } catch (_) {}
+        try { document.getElementById('response-timer').style.display = 'none'; } catch (_) {}
+        return;
+      }
+      const items = selectedQueue.map((f, idx) => `
+        <div class="file-item">
+          <div class="file-info">
+            <strong>${escapeHtml(f.name)}</strong>
+            <div class="file-details"><span class="file-size">${formatFileSize(f.size)}</span></div>
+          </div>
+          <button class="remove-file" onclick="removeAtIndex(${idx})">×</button>
+        </div>
+      `).join('');
+      el.innerHTML = `<h4>Selected Files (${selectedQueue.length})</h4>${items}`;
+      sendBtn.disabled = isRequesting;
+    }
+
+    function removeAtIndex(idx){
+      const removed = selectedQueue.splice(idx,1)[0];
+      const wasCurrentTop = (idx === 0 && currentFileId && selectedFile && removed && removed.name === selectedFile.name && removed.size === selectedFile.size);
+      selectedFile = selectedQueue[0] || null;
+      document.getElementById("fileInput").value = "";
+      renderSelectedList();
+      // If we removed the top file while waiting for responses, cancel pending offer and proceed to next if exists
+      if (wasCurrentTop) {
+        try {
+          // Hide current timer UI
+          if (window.responseCountdown) clearInterval(window.responseCountdown);
+          document.getElementById('response-timer').style.display = 'none';
+        } catch (_) {}
+        try {
+          sendSocket.emit('cancel-pending-offer', { sessionId, fileId: currentFileId, senderId: peerId });
+        } catch (_) {}
+        // Reset current id and request next if available
+        currentFileId = null;
+        isRequesting = false;
+        if (selectedFile) {
+          setTimeout(() => requestToSendFile(), 250);
+        }
+      }
+    }
+
+    // Function to request to send the current file
+    function requestToSendFile() {
+      if (!selectedFile || isRequesting) return;
+      
+      isRequesting = true;
+      const sendBtn = document.getElementById("sendBtn");
+      sendBtn.disabled = true;
+      sendBtn.textContent = '⏳ Requesting...';
+      
+      // First request a send lock
+      console.log("Requesting send lock with:", { sessionId, senderId: peerId });
+      sendSocket.emit("request-send-lock", { sessionId, senderId: peerId }, (response) => {
+        console.log("Send lock response:", response);
+        if (response.ok) {
+          // Lock acquired, now send the file request
+          currentFileId = `${peerId}-${Date.now()}`;
+          const fileObj = { id: currentFileId, name: selectedFile.name, size: selectedFile.size, type: selectedFile.type };
+          
+          console.log("Lock acquired, sending request-to-send with:", { sessionId, file: fileObj, senderId: peerId });
+          // Emit the request to the server
+          sendSocket.emit("request-to-send", { sessionId, file: fileObj, senderId: peerId });
+        } else {
+          // Lock request failed
+          isRequesting = false;
+          sendBtn.disabled = false;
+          sendBtn.textContent = '📤 Request to Send';
+          showNotification(response.message || "Cannot send file right now. Please try again later.", "error");
+        }
+      });
+    }
+    
+    // This button now sends a request instead of starting the upload directly
+    document.getElementById("sendBtn").addEventListener("click", requestToSendFile);
+
+    async function startUpload(fileId) {
+        document.getElementById("upload-section").style.display = "block";
+        const progressTracker = new ProgressTracker();
+        progressTracker.start(selectedFile.size);
+
+        const formData = new FormData();
+        formData.append("file", selectedFile);
+        formData.append("fileId", fileId);
+        formData.append("peerId", peerId);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `/upload/${sessionId}`, true);
+
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const stats = progressTracker.update(e.loaded);
+                document.getElementById("upload-list").innerHTML = `
+                    <div class="upload-item">
+                        <div class="file-info">
+                            <span class="file-name">${escapeHtml(selectedFile.name)}</span>
+                            <span class="upload-status">${stats.progress.toFixed(1)}%</span>
+                        </div>
+                        <div class="progress-bar"><div class="progress-fill" style="width:${stats.progress}%"></div></div>
+                    </div>`;
+                document.getElementById('upload-stats').textContent = `Speed: ${formatSpeed(stats.speed)} • ETA: ${formatTime(stats.eta)}`;
+                // Broadcast progress to receivers
+                try { sendSocket.emit('sender-progress', { sessionId, fileId, loaded: e.loaded, total: selectedFile.size, speedBps: stats.speed, etaSeconds: stats.eta }); } catch (_) {}
+            }
+        };
+
+        xhr.onload = () => {
+            if (xhr.status === 200) {
+                // SUCCESS: Notify server to deliver download URLs to accepted receivers
+                const fileMetadata = { id: fileId, name: selectedFile.name, size: selectedFile.size, type: selectedFile.type };
+                sendSocket.emit('upload-complete', { sessionId, file: fileMetadata });
+                showNotification("Upload complete! Receivers can now download.", "success");
+                document.getElementById("upload-title").textContent = "Uploaded";
+                // Hide speed/ETA once upload completes
+                try { document.getElementById('upload-stats').textContent = ''; } catch (_) {}
+                
+                // Dequeue and move to next file automatically if available
+                if (selectedQueue.length > 0) {
+                  // remove the just-sent file (first)
+                  selectedQueue.shift();
+                  selectedFile = selectedQueue[0] || null;
+                  renderSelectedList();
+                  // Reset request state
+                  isRequesting = false;
+                  const sendBtn = document.getElementById("sendBtn");
+                  sendBtn.disabled = !selectedFile;
+                  sendBtn.textContent = '📤 Request to Send';
+                  
+                  // Automatically request to send the next file
+                  if (selectedFile) {
+                    setTimeout(() => {
+                      requestToSendFile();
+                    }, 1000); // Small delay before sending next request
+                  }
+                } else {
+                  // No more files queued – fully reset request state so user can select new files and send again
+                  isRequesting = false;
+                  const sendBtn = document.getElementById("sendBtn");
+                  sendBtn.disabled = !selectedFile;
+                  sendBtn.textContent = '📤 Request to Send';
+                }
+            } else {
+                showError("Upload failed: " + xhr.statusText);
+                resetState();
+            }
+        };
+
+        xhr.onerror = () => {
+             showError("Upload failed due to a network error.");
+             resetState();
+        };
+
+        xhr.send(formData);
+    }
+
+    function resetState() {
+      selectedFile = null;
+      currentFileId = null;
+      isRequesting = false;
+      document.getElementById("upload-section").style.display = "none";
+      document.getElementById("upload-list").innerHTML = "";
+      document.getElementById("sendBtn").textContent = '📤 Request to Send';
+      selectedQueue = [];
+      renderSelectedList();
+    }
+
+    function goBack(){
+      try { 
+        if (sendSocket && sendSocket.connected) {
+          // 🆕 NEW: Notify server that we're leaving send page
+          sendSocket.emit('leave-send-page', { sessionId, peerId });
+          
+          // Emit cancel-transfer to unlock and redirect all users to main page
+          sendSocket.emit('cancel-transfer', { sessionId });
+          // Wait a moment for the event to be processed before redirecting
+          setTimeout(() => {
+            try { sessionStorage.setItem(`nav_history_${sessionId}`, '1'); } catch (_) {}
+            try { localStorage.setItem(`nav_hist_${sessionId}`, '1'); } catch (_) {}
+            window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+          }, 100);
+        } else {
+          try { sessionStorage.setItem(`nav_history_${sessionId}`, '1'); } catch (_) {}
+          try { localStorage.setItem(`nav_hist_${sessionId}`, '1'); } catch (_) {}
+          window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+        }
+      } catch (e) {
+        try { sessionStorage.setItem(`nav_history_${sessionId}`, '1'); } catch (_) {}
+        try { localStorage.setItem(`nav_hist_${sessionId}`, '1'); } catch (_) {}
+        window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+      }
+    }
+
+    setupSocket();
+    
+    // 🆕 NEW: Browser back detection and cleanup
+    (function(){
+      console.log('🔒 Setting up browser back detection for send page...');
+      
+      // Push current state to history
+      try {
+        window.history.pushState(null, null, window.location.href);
+        console.log('✅ History state pushed for send page');
+      } catch (e) {
+        console.error('❌ Failed to push history state:', e);
+      }
+      
+      // Detect browser back navigation
+      function handleBackNavigation(event) {
+        console.log('🚫 Browser back detected on send page!');
+        
+        // Notify server that we're leaving send page
+        if (sendSocket && sendSocket.connected) {
+          console.log('📤 Notifying server of browser back from send page');
+          sendSocket.emit('leave-send-page', { sessionId, peerId });
+          sendSocket.emit('cancel-transfer', { sessionId });
+        }
+        
+        // Prevent the back navigation
+        event.preventDefault();
+        event.stopPropagation();
+        
+        // Push state again
+        try {
+          window.history.pushState(null, null, window.location.href);
+        } catch (e) {
+          console.error('❌ Failed to re-push history state:', e);
+        }
+        
+        // Show alert and redirect properly
+        alert('⚠️ Please use the "Go Back" button to leave the send page properly.');
+        
+        // Redirect to main page properly
+        setTimeout(() => {
+          try { sessionStorage.setItem(`nav_history_${sessionId}`, '1'); } catch (_) {}
+          try { localStorage.setItem(`nav_hist_${sessionId}`, '1'); } catch (_) {}
+          window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+        }, 100);
+      }
+      
+      // Add popstate listener
+      window.addEventListener('popstate', handleBackNavigation, true);
+      console.log('✅ Browser back detection set up for send page');
+      
+      // Also handle beforeunload (page close/refresh)
+      window.addEventListener('beforeunload', function(e) {
+        console.log('🚫 Page unload detected on send page');
+        if (sendSocket && sendSocket.connected) {
+          sendSocket.emit('leave-send-page', { sessionId, peerId });
+          sendSocket.emit('cancel-transfer', { sessionId });
+        }
+      });
+      
+    })();
+  </script>
+</body>
+</html>

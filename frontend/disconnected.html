@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Disconnected</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .center-box { max-width: 640px; margin: 60px auto; text-align: center; padding: 24px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); border-radius: 12px; }
+  </style>
+  <script>
+    (function(){
+      try {
+        const sid = new URLSearchParams(location.search).get('session');
+        if (sid) localStorage.setItem(`exited_${sid}`, '1');
+      } catch (_) {}
+    })();
+  </script>
+  </head>
+<body>
+  <div class="container">
+    <div class="center-box">
+      <h1>⚠️ You are disconnected</h1>
+      <p>Session exited. Follow the navigation flow to join again:</p>
+      <p><strong>Scan QR → Enter PIN → Main</strong></p>
+      <p style="opacity:.8; font-size: 0.95em;">If this page was opened by refresh, this is expected after exiting the session.</p>
+      <div style="margin-top:16px;">
+        <button class="btn btn-secondary" onclick="location.reload()">Refresh</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+

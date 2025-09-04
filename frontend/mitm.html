@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>StreamSaver mitm</title>
+</head>
+<body>
+<script>
+  // This is a service worker that allows streaming downloads
+  // It is required for StreamSaver.js to function properly
+  (async () => {
+    try {
+      const isSecure = window.isSecureContext
+      let swUrl = 'https://jimmywarting.github.io/StreamSaver.js/sw.js?version=2.0.0'
+      let mitmUrl = new URL(swUrl).searchParams.get('sw') || swUrl
+
+      // If the page is not secure, it might be a local development server
+      // or an environment that doesn't support service workers.
+      // In such cases, we fall back to a less efficient method.
+      if (!isSecure) {
+        mitmUrl = 'https://jimmywarting.github.io/StreamSaver.js/mitm.html?version=2.0.0'
+      }
+
+      // Try to register the service worker if possible
+      if ('serviceWorker' in navigator && isSecure) {
+        await navigator.serviceWorker.register(swUrl, { scope: './' })
+          .catch(err => console.error('ServiceWorker registration failed:', err))
+      }
+      
+      const iframe = document.createElement('iframe')
+      iframe.hidden = true
+      iframe.src = mitmUrl
+      iframe.name = 'iframe'
+      document.body.appendChild(iframe)
+    } catch (err) {
+      console.error('mitm.html setup error:', err)
+    }
+  })()
+</script>
+</body>
+</html>

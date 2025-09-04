@@ -1,0 +1,41 @@
+{
+  "name": "fileshare-50gb",
+  "version": "2.0.0",
+  "description": "High-performance file sharing application supporting files up to 50GB with browser streaming",
+  "main": "backend/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node --watch backend/server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "file-sharing",
+    "streaming",
+    "large-files",
+    "p2p",
+    "websockets",
+    "50gb"
+  ],
+  "author": "FileShare Team",
+  "license": "MIT",
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "express": "^4.18.2",
+    "nanoid": "^5.0.4",
+    "open": "^9.1.0",
+    "qrcode": "^1.5.3",
+    "socket.io": "^4.7.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/fileshare-50gb.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/fileshare-50gb/issues"
+  },
+  "homepage": "https://github.com/your-username/fileshare-50gb#readme"
+}

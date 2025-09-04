@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FileShare - Join Session</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔗 Join FileShare Session</h1>
+      <p id="header-description">Enter the 6-digit PIN provided by the host.</p>
+    </div>
+
+    <div class="connect-section">
+      <form id="pin-form" class="pin-section">
+        <div class="pin-input-container" style="margin-bottom:8px;">
+          <input
+            type="text"
+            id="device-name-input"
+            placeholder="Enter your device name"
+            maxlength="40"
+            autocomplete="off"
+            required
+          />
+        </div>
+        <div class="pin-input-container">
+          <input
+            type="tel"
+            id="pin-input"
+            minlength="6"
+            maxlength="6"
+            placeholder="Enter 6-digit PIN"
+            autocomplete="off"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            required
+          />
+        </div>
+        <div class="pin-timer" id="pin-timer">Time left: --:--</div>
+        <button type="submit" id="connect-btn" class="btn btn-primary">
+          Join Session
+        </button>
+      </form>
+      <div id="error-message" class="error-message" style="display: none;"></div>
+      <div id="status-message" class="status-message" style="display: none; color: #2196F3; margin-top: 8px;"></div>
+    </div>
+    
+    <!-- 🆕 NEW: Popup message for PIN verification -->
+    <div id="popupMessage" class="popup-message" style="display: none;">
+      <div class="popup-content">
+        <div class="popup-header">
+          <span id="popupTitle">PIN Verified!</span>
+          <button id="popupClose" class="popup-close">&times;</button>
+        </div>
+        <div id="popupBody" class="popup-body">
+          Redirecting to main page...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+  <script>
+    // PIN entry logic for both QR and manual entry
+    const pinForm = document.getElementById('pin-form');
+    const pinInput = document.getElementById('pin-input');
+    const deviceNameInput = document.getElementById('device-name-input');
+    const connectBtn = document.getElementById('connect-btn');
+    const errorDisplay = document.getElementById('error-message');
+    const statusDisplay = document.getElementById('status-message');
+    const headerDescription = document.getElementById('header-description');
+    let pinTimerInterval;
+    let isConnecting = false;
+    let currentSessionId = null;
+
+    // Get device name from localStorage if available
+    try {
+      const savedDeviceName = localStorage.getItem('device_name');
+      if (savedDeviceName) {
+        deviceNameInput.value = savedDeviceName;
+      }
+    } catch (_) {}
+
+    function showError(message) {
+      errorDisplay.textContent = message;
+      errorDisplay.style.display = 'block';
+      statusDisplay.style.display = 'none';
+    }
+
+    function showStatus(message) {
+      statusDisplay.textContent = message;
+      statusDisplay.style.display = 'block';
+      errorDisplay.style.display = 'none';
+    }
+
+    function getPeerId() {
+      return 'peer_' + Math.random().toString(36).substr(2, 9);
+    }
+
+    // 🆕 NEW: Popup message functions
+    function showPopupMessage(title, message, type = 'info') {
+      console.log('🔍 showPopupMessage called:', { title, message, type });
+      
+      const popup = document.getElementById('popupMessage');
+      const popupTitle = document.getElementById('popupTitle');
+      const popupBody = document.getElementById('popupBody');
+      
+      if (!popup || !popupTitle || !popupBody) {
+        console.error('❌ Popup elements not found:', { popup: !!popup, popupTitle: !!popupTitle, popupBody: !!popupBody });
+        return;
+      }
+      
+      popupTitle.textContent = title;
+      popupBody.textContent = message;
+      
+      // Set type-specific styling
+      popup.className = `popup-message popup-${type}`;
+      
+      popup.style.display = 'block';
+      
+      console.log('✅ Popup displayed:', popup.style.display);
+      
+      // Don't auto-hide - let user see the message until redirect
+    }
+
+    function updatePopupMessage(title, message, type = 'info') {
+      console.log('🔍 updatePopupMessage called:', { title, message, type });
+      
+      const popup = document.getElementById('popupMessage');
+      const popupTitle = document.getElementById('popupTitle');
+      const popupBody = document.getElementById('popupBody');
+      
+      if (!popup || !popupTitle || !popupBody) {
+        console.error('❌ Popup elements not found for update:', { popup: !!popup, popupTitle: !!popupTitle, popupBody: !!popupBody });
+        return;
+      }
+      
+      popupTitle.textContent = title;
+      popupBody.textContent = message;
+      
+      // Set type-specific styling
+      popup.className = `popup-message popup-${type}`;
+      
+      console.log('✅ Popup updated:', { title, message, type });
+    }
+
+    function hidePopupMessage() {
+      const popup = document.getElementById('popupMessage');
+      popup.style.display = 'none';
+    }
+
+    // Check if this is QR-based access (has session ID in URL)
+    const urlSessionId = getUrlParameter('session');
+    const isQRBased = !!urlSessionId;
+    const peerId = getUrlParameter('peerId');
+    const role = getUrlParameter('role');
+
+    // 🆕 NEW: If we have a peerId, notify server that we're on PIN page (browser back scenario)
+    if (peerId && role === 'client' && urlSessionId) {
+      console.log('PIN page: Detected browser back navigation, notifying server');
+      const pinSocket = io();
+      pinSocket.on('connect', () => {
+        pinSocket.emit('enter-pin-page', { sessionId: urlSessionId, peerId: peerId });
+        console.log('PIN page: Notified server of PIN page navigation');
+        // Disconnect after notification
+        setTimeout(() => pinSocket.disconnect(), 1000);
+      });
+    }
+
+    if (isQRBased) {
+      // QR-based access - validate session and set up for existing session
+      currentSessionId = urlSessionId;
+      headerDescription.textContent = 'Enter the PIN displayed on the host screen.';
+      
+      // Clear any prior client exit flag for this session (fresh QR scan)
+      try { 
+        localStorage.removeItem('exited_' + urlSessionId); 
+        console.log('Cleared exited flag for session ' + urlSessionId);
+        localStorage.setItem('nav_hist_' + urlSessionId, '0');
+      } catch (_) {}
+      
+      // Set navigation token for QR-based access
+      try {
+        sessionStorage.setItem('nav_token_pin_' + urlSessionId, '1');
+        sessionStorage.setItem('nav_history_' + urlSessionId, '1');
+      } catch (_) {}
+      
+      // Start timer for existing session
+      fetchSessionDetails(urlSessionId);
+    } else {
+      // Manual entry - no session ID, will find session by PIN
+      headerDescription.textContent = 'Enter the 6-digit PIN provided by the host.';
+      startPinTimerForManualEntry();
+    }
+
+    // Start PIN timer based on actual session expiry (for manual entry)
+    async function startPinTimerForManualEntry() {
+      try {
+        const response = await fetch('/api/get-pin-expiry');
+        if (response.ok) {
+          const data = await response.json();
+          const expiryTime = data.pinExpiry;
+          currentSessionId = data.sessionId;
+          
+          console.log('PIN timer synchronized with host:', expiryTime, currentSessionId);
+          
+          // Store timer state for consistency
+          try {
+            localStorage.setItem('pin_timer_' + currentSessionId, JSON.stringify({
+              expiryTime: expiryTime,
+              sessionId: currentSessionId
+            }));
+          } catch (_) {}
+          
+          pinTimerInterval = setInterval(() => {
+            const remaining = Math.max(0, expiryTime - Date.now());
+            if (remaining === 0) {
+              clearInterval(pinTimerInterval);
+              document.getElementById('pin-timer').textContent = "PIN expired!";
+              showError("PIN has expired. Please get a new PIN from the host.");
+              pinInput.disabled = true;
+              connectBtn.disabled = true;
+              return;
+            }
+            
+            const minutes = Math.floor(remaining / 60000);
+            const seconds = Math.floor((remaining % 60000) / 1000);
+            document.getElementById('pin-timer').textContent = 'Time left: ' + minutes + ':' + String(seconds).padStart(2, '0');
+          }, 1000);
+        }
+      } catch (err) {
+        console.error('Failed to get PIN expiry:', err);
+        // Fallback to 5 minutes if can't get server time
+        const endTime = Date.now() + (5 * 60 * 1000);
+        pinTimerInterval = setInterval(() => {
+          const remaining = Math.max(0, endTime - Date.now());
+          if (remaining === 0) {
+            clearInterval(pinTimerInterval);
+            document.getElementById('pin-timer').textContent = "PIN expired!";
+            showError("PIN has expired. Please get a new PIN from the host.");
+            pinInput.disabled = true;
+            connectBtn.disabled = true;
+            return;
+          }
+          
+          const minutes = Math.floor(remaining / 60000);
+          const seconds = Math.floor((remaining % 60000) / 1000);
+          document.getElementById('pin-timer').textContent = 'Time left: ' + minutes + ':' + String(seconds).padStart(2, '0');
+        }, 1000);
+      }
+    }
+
+    // For QR-based access - fetch session details and start timer
+    async function fetchSessionDetails(sessionId) {
+      try {
+        const response = await fetch('/api/session-details/' + sessionId);
+        if (!response.ok) throw new Error('Session not found.');
+        const data = await response.json();
+        startPinTimer(data.pinExpiry);
+      } catch (err) {
+        showError(err.message + " Please get a new QR code from the host.");
+        pinInput.disabled = true;
+        connectBtn.disabled = true;
+      }
+    }
+
+    // Start PIN timer for QR-based access
+    function startPinTimer(expiryTime) {
+      if (pinTimerInterval) clearInterval(pinTimerInterval);
+      const timerEl = document.getElementById('pin-timer');
+
+      pinTimerInterval = setInterval(() => {
+        const remaining = Math.max(0, expiryTime - Date.now());
+        if (remaining === 0) {
+          clearInterval(pinTimerInterval);
+          timerEl.textContent = "PIN expired!";
+          showError("This session has expired. Please scan a new QR code.");
+          pinInput.disabled = true;
+          connectBtn.disabled = true;
+          return;
+        }
+        const minutes = Math.floor(remaining / 60000);
+        const seconds = Math.floor((remaining % 60000) / 1000);
+        timerEl.textContent = 'Time left: ' + minutes + ':' + String(seconds).padStart(2, '0');
+      }, 1000);
+    }
+
+    // Unified connection function for both QR and manual entry
+    async function attemptConnection() {
+      if (isConnecting) return; // Prevent multiple simultaneous attempts
+      
+      const pin = pinInput.value.trim();
+      const deviceName = (deviceNameInput.value || '').trim();
+      
+      // Validate inputs
+      if (!deviceName) {
+        showError('Please enter your device name');
+        deviceNameInput.focus();
+        return;
+      }
+      
+      if (pin.length !== 6) {
+        showError('Please enter exactly 6 digits');
+        pinInput.focus();
+        return;
+      }
+      
+      if (!/^\d{6}$/.test(pin)) {
+        showError('PIN must contain only numbers');
+        pinInput.focus();
+        return;
+      }
+      
+      errorDisplay.style.display = 'none';
+      connectBtn.disabled = true;
+      connectBtn.textContent = 'Connecting...';
+      isConnecting = true;
+
+      try {
+        let sessionData;
+        let response;
+        
+        if (isQRBased) {
+          // QR-based: verify PIN for existing session
+          response = await fetch('/api/verify-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: currentSessionId, pin }),
+          });
+          sessionData = await response.json();
+        } else {
+          // Manual entry: find session by PIN
+          response = await fetch('/api/find-session-by-pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin }),
+          });
+          sessionData = await response.json();
+          if (response.ok && sessionData.success) {
+            currentSessionId = sessionData.sessionId;
+          }
+        }
+
+        if (response.ok && sessionData.success) {
+          try { localStorage.setItem('device_name', deviceName); } catch (_) {}
+          
+          // Set navigation token for main page access
+          if (sessionData.navToken) {
+            sessionStorage.setItem(sessionData.navToken, '1');
+          }
+          
+          // Clear the exited flag when PIN verification succeeds
+          try { 
+            localStorage.removeItem('exited_' + currentSessionId);
+            sessionStorage.setItem('rejoining_' + currentSessionId, '1');
+          } catch (_) {}
+          
+          // 🆕 NEW: Show popup message for PIN verification
+          showPopupMessage('PIN Verified!', 'Redirecting to main page...', 'success');
+          
+          const socket = io();
+          let joinTimeout;
+          
+          // Set a timeout for joining
+          joinTimeout = setTimeout(() => {
+            showError('Connection timeout. Please try again.');
+            isConnecting = false;
+            connectBtn.disabled = false;
+            connectBtn.textContent = 'Join Session';
+            socket.disconnect();
+          }, 10000);
+          
+          socket.on('connect', () => {
+            console.log('Socket connected, joining session...');
+            const peerId = getPeerId();
+            
+            // Emit join events
+            socket.emit('client-has-verified', { sessionId: currentSessionId });
+            
+            // Wait for session-joined confirmation
+            socket.on('session-joined', (joinData) => {
+              clearTimeout(joinTimeout);
+              console.log('Session joined successfully:', joinData);
+              
+              // 🆕 NEW: Update popup message for successful join
+              updatePopupMessage('Session Joined!', 'Redirecting to main page...', 'success');
+              
+              setTimeout(() => {
+                window.location.href = '/main.html?session=' + currentSessionId + '&role=client&peerId=' + peerId;
+              }, 3000); // Increased delay to 3 seconds to show popup message
+            });
+            
+            // Handle join errors
+            socket.on('join-error', (error) => {
+              clearTimeout(joinTimeout);
+              showError(error.message || 'Failed to join session');
+              isConnecting = false;
+              connectBtn.disabled = false;
+              connectBtn.textContent = 'Join Session';
+              socket.disconnect();
+            });
+          });
+          
+          socket.on('connect_error', (error) => {
+            clearTimeout(joinTimeout);
+            showError('Connection failed. Please try again.');
+            isConnecting = false;
+            connectBtn.disabled = false;
+            connectBtn.textContent = 'Join Session';
+          });
+        } else {
+          errorDisplay.textContent = sessionData.error || 'Invalid PIN. Please check and try again.';
+          errorDisplay.style.display = 'block';
+          pinInput.value = '';
+          isConnecting = false;
+          connectBtn.disabled = false;
+          connectBtn.textContent = 'Join Session';
+        }
+      } catch (err) {
+        console.error('Connection error:', err);
+        // Only show network error if we're still connecting and haven't succeeded
+        if (isConnecting) {
+          errorDisplay.textContent = 'Network error. Could not connect to the server.';
+          errorDisplay.style.display = 'block';
+          isConnecting = false;
+          connectBtn.disabled = false;
+          connectBtn.textContent = 'Join Session';
+        }
+      }
+    }
+
+    pinForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      attemptConnection();
+    });
+
+    pinInput.addEventListener('input', () => {
+      const pin = pinInput.value;
+      console.log('PIN input changed:', pin, 'Length:', pin.length);
+      // Clear previous errors
+      errorDisplay.style.display = 'none';
+      
+      // Only attempt connection if PIN is exactly 6 digits
+      if (pin.length === 6) {
+        if (!/^\d{6}$/.test(pin)) {
+          showError('PIN must contain only numbers');
+          return;
+        }
+        // Prevent multiple simultaneous connection attempts
+        if (!isConnecting) {
+          // Add a small delay to prevent rapid-fire attempts
+          setTimeout(() => {
+            if (!isConnecting) {
+              attemptConnection();
+            }
+          }, 100);
+        }
+      }
+    });
+
+    // Focus on PIN input when page loads
+    window.addEventListener('load', () => {
+      pinInput.focus();
+    });
+
+    // 🆕 NEW: Add popup close button functionality
+    document.getElementById('popupClose').addEventListener('click', () => {
+      hidePopupMessage();
+    });
+  </script>
+</body>
+</html>

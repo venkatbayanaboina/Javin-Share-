@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.dmg
+*.zip
+*.app
+
+
+# Do not commit local TLS certs

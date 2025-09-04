@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FileShare - Receive</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>📥 Receive Files</h1></div>
+
+    <div id="status-message" class="status-message status-wait-rec"><h3>Waiting for file offers...</h3></div>
+    <div id="sender-progress" style="display:none; margin: 8px 0;" class="status-message status-info"></div>
+    <div id="response-timer" class="timer-container" style="display:none;">
+      <div class="timer-label">Time to respond: <span id="timer-count">30</span>s</div>
+      <div class="response-count">Responses: <span id="response-count">0</span>/<span id="total-receivers">0</span></div>
+    </div>
+
+    <div id="incoming-files" style="display:none;" class="file-list">
+      <h3>Incoming File</h3>
+      <div id="incoming-container"></div>
+      <div class="modal-buttons">
+        <button id="accept-btn" class="btn btn-primary">📥 Accept</button>
+        <button id="reject-btn" class="btn btn-exit">❌ Reject</button>
+      </div>
+    </div>
+
+    <div id="download-progress" style="display:none;" class="progress-section">
+      <h3>Downloading...</h3>
+      <div id="download-list"></div>
+      <div id="download-stats"></div>
+      <button id="cancel-download" class="btn btn-secondary">Cancel Download</button>
+    </div>
+
+    
+
+
+
+    <div id="recv-history" class="file-list" style="display:none; margin-top:16px;">
+      <h3>📋 Recent Received Files</h3>
+      <div id="recv-history-content"></div>
+    </div>
+
+
+    <div style="margin-top:20px;"><button onclick="confirmExit()" class="exit-button">⤴ Exit</button></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="script.js"></script>
+  <script>
+    // Enhanced client-side guard with session validation
+    (async function(){
+      try {
+        const sid = getUrlParameter('session');
+        const forced = getUrlParameter('forced') === 'true';
+        const role = getUrlParameter('role');
+        
+        if (!sid) {
+          document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Invalid Access</h2><p>No session ID found. Please scan the QR code to join a session.</p></div></div>';
+          return;
+        }
+        
+        // Check if user previously exited this session
+        const hasExitedFlag = localStorage.getItem(`exited_${sid}`) === '1';
+        
+        // Also check if this is an old session that might be expired
+        // Clear old session data to prevent flash of PIN page
+        try {
+          const oldSessionData = localStorage.getItem(`nav_hist_${sid}`);
+          if (oldSessionData === '0' || hasExitedFlag) {
+            // Clear all old session data
+            localStorage.removeItem(`exited_${sid}`);
+            localStorage.removeItem(`nav_hist_${sid}`);
+            sessionStorage.removeItem(`nav_token_recv_${sid}`);
+            sessionStorage.removeItem(`nav_token_main_${sid}`);
+            sessionStorage.removeItem(`nav_token_send_${sid}`);
+            
+            // Redirect based on role
+            if (role === 'host') {
+              window.location.href = '/?forceNew=1';
+            } else {
+              window.location.href = `/disconnected.html?session=${sid}&role=${role}`;
+            }
+            return;
+          }
+        } catch (_) {}
+        
+        // If client previously exited, redirect to disconnected page
+        if (role !== 'host' && hasExitedFlag) {
+          console.log('Redirecting exited non-host to disconnected page');
+          window.location.href = `/disconnected.html?session=${sid}&role=${role}`;
+          return;
+        }
+        
+        // If host previously exited, redirect to index page
+        if (role === 'host' && hasExitedFlag) {
+          console.log('Redirecting exited host to index page');
+          window.location.href = '/?forceNew=1';
+          return;
+        }
+        
+        // Only validate session if this is a forced redirect (from send action)
+        // For normal navigation, let the socket connection handle session validation
+        if (forced) {
+          try {
+            const response = await fetch(`/api/session-details/${sid}`);
+            if (!response.ok) {
+              // Session doesn't exist - clear old session data and show expired message
+              console.log(`Session ${sid} not found, clearing old data and showing expired message`);
+              
+              // Clear old session data
+              try {
+                localStorage.removeItem(`exited_${sid}`);
+                localStorage.removeItem(`nav_hist_${sid}`);
+                sessionStorage.removeItem(`nav_token_recv_${sid}`);
+                sessionStorage.removeItem(`nav_token_main_${sid}`);
+                sessionStorage.removeItem(`nav_token_send_${sid}`);
+              } catch (_) {}
+              
+              const role = getUrlParameter('role');
+              
+              if (role === 'host') {
+                // Host gets a button to go to index page (not main since session is expired)
+                document.body.innerHTML = `
+                  <div class="container">
+                    <div class="error">
+                      <h2>❌ Session Expired</h2>
+                      <p>This session has expired or no longer exists.</p>
+                      <p>Please start a new session.</p>
+                      <div style="margin-top: 20px;">
+                        <button class="error-page-btn" onclick="window.location.href='/'">Go to Index</button>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              } else {
+                // Non-host users just see the error message, no button
+                document.body.innerHTML = `
+                  <div class="container">
+                    <div class="error">
+                      <h2>❌ Session Expired</h2>
+                      <p>This session has expired or no longer exists.</p>
+                      <p>Please scan the new QR code from the host to join the current session.</p>
+                    </div>
+                  </div>
+                `;
+              }
+              return;
+            }
+            console.log(`Session ${sid} validated successfully`);
+          } catch (err) {
+            console.error('Error validating session:', err);
+            const role = getUrlParameter('role');
+            
+            // Clear old session data on connection error
+            try {
+              localStorage.removeItem(`exited_${sid}`);
+              localStorage.removeItem(`nav_hist_${sid}`);
+              sessionStorage.removeItem(`nav_token_recv_${sid}`);
+              sessionStorage.removeItem(`nav_token_main_${sid}`);
+              sessionStorage.removeItem(`nav_token_send_${sid}`);
+            } catch (_) {}
+            
+            if (role === 'host') {
+              // Host gets a button to go to index page (not main since session is expired)
+              document.body.innerHTML = `
+                <div class="container">
+                  <div class="error">
+                    <h2>❌ Connection Error</h2>
+                    <p>Could not verify session. Please try again.</p>
+                    <div style="margin-top: 20px;">
+                      <button class="error-page-btn" onclick="window.location.href='/'">Go to Index</button>
+                    </div>
+                  </div>
+                </div>
+              `;
+            } else {
+              // Non-host users just see the error message, no button
+              document.body.innerHTML = `
+                <div class="container">
+                  <div class="error">
+                    <h2>❌ Connection Error</h2>
+                    <p>Could not verify session. Please try again.</p>
+                  </div>
+                </div>
+              `;
+            }
+            return;
+          }
+        }
+        
+        if (!forced) {
+          const token = sessionStorage.getItem(`nav_token_recv_${sid}`);
+          if (!token) {
+            // Check if this might be a page refresh by looking for other session indicators
+            const hasSessionParam = getUrlParameter('session') === sid;
+            const hasRoleParam = getUrlParameter('role') === 'client';
+            
+            if (hasSessionParam && hasRoleParam) {
+              // This looks like a legitimate page refresh - allow it
+              console.log('Allowing page refresh for receive page');
+            } else {
+              // This is unauthorized direct access
+              const role = getUrlParameter('role');
+              if (role === 'host') {
+                // Host gets a button to go to main page
+                document.body.innerHTML = `<div class="container"><div class="error"><h2>Unauthorized navigation</h2><p>Please start from the main page.</p><div style="margin-top: 20px;"><button class="error-page-btn" onclick="window.location.href='/main.html?session=${sid}&role=host&peerId=${getPeerId()}'">Go to Main</button></div></div></div>`;
+              } else {
+                // Non-host users just see the error message, no button
+                document.body.innerHTML = `<div class="container"><div class="error"><h2>Unauthorized navigation</h2><p>Please start from the main page.</p></div></div>`;
+              }
+              throw new Error('Blocked direct navigation to receive');
+            }
+          }
+          // Don't remove token immediately - remove it after page loads successfully
+          // sessionStorage.removeItem(`nav_token_recv_${sid}`);
+        }
+      } catch (e) { 
+        console.warn('Navigation guard error:', e.message); 
+        return; 
+      }
+    })();
+    const sessionId = getUrlParameter("session");
+    const role = getUrlParameter("role");
+    const peerId = getPeerId();
+    const forcedRedirect = getUrlParameter("forced") === "true";
+    let receiveSocket;
+    let offeredFile = null;
+    let downloadController = null;
+    let lastObservedSpeed = null;
+    async function refreshRecent() {
+      try {
+        const resp = await fetch(`/recent/${peerId}`);
+        const data = await resp.json();
+        const container = document.getElementById('recv-history');
+        const content = document.getElementById('recv-history-content');
+        const myItems = (data || []).filter(t => t.receiverId === peerId);
+        if (!myItems.length) { container.style.display = 'none'; return; }
+        container.style.display = 'block';
+        // Most recent first
+        const rows = myItems.sort((a,b)=>b.timestamp - a.timestamp);
+        content.innerHTML = rows.map((t, idx) => `
+          <div class="history-item">
+            <div class="history-info">
+              <strong>${idx + 1}. ${escapeHtml(t.fileName)}</strong>
+              <div class="history-details">
+                <span>Size: ${formatFileSize(t.size)}</span>
+                <span>From: ${escapeHtml(t.senderName || (t.senderId || '').substring(0,6))}</span>
+                <span>${new Date(t.timestamp).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } catch (e) { console.error('Error refreshing receiver history:', e); }
+    }
+    
+
+
+    // If this is a forced redirect (from someone else's send action), do nothing special for exit
+
+    // Using native browser download; no external StreamSaver dependency
+
+   // Replace the setupSocket function in receive.html with this fixed version:
+
+              function setupSocket() {
+                receiveSocket = io();
+                
+                // Add connection timeout to prevent infinite retries
+                const connectionTimeout = setTimeout(() => {
+                  if (receiveSocket && !receiveSocket.connected) {
+                    console.error("Connection timeout - session may not exist");
+                    if (role === 'host') {
+                      // Host gets a button to go to main page
+                      document.body.innerHTML = `
+                        <div class="container">
+                          <div class="error">
+                            <h2>❌ Connection Timeout</h2>
+                            <p>Could not connect to the session. This may mean:</p>
+                            <ul style="text-align: left; margin: 20px 0;">
+                              <li>The session has expired</li>
+                              <li>The host has restarted the server</li>
+                              <li>There's a network issue</li>
+                            </ul>
+                            <p>Please scan the new QR code from the host.</p>
+                            <div style="margin-top: 20px;">
+                              <button class="error-page-btn" onclick="window.location.href='/main.html?session=${sessionId}&role=host&peerId=${peerId}'">Go to Main</button>
+                            </div>
+                          </div>
+                        </div>
+                      `;
+                    } else {
+                      // Non-host users just see the error message, no button
+                      document.body.innerHTML = `
+                        <div class="container">
+                          <div class="error">
+                            <h2>❌ Connection Timeout</h2>
+                            <p>Could not connect to the session. This may mean:</p>
+                            <ul style="text-align: left; margin: 20px 0;">
+                              <li>The session has expired</li>
+                              <li>The host has restarted the server</li>
+                              <li>There's a network issue</li>
+                            </ul>
+                            <p>Please scan the new QR code from the host.</p>
+                          </div>
+                        </div>
+                      `;
+                    }
+                  }
+                }, 15000); // 15 second timeout
+                
+                receiveSocket.on("connect", () => {
+                  console.log("Receive page: Socket connected, joining session...");
+                  clearTimeout(connectionTimeout); // Clear timeout on successful connection
+                  let deviceName = '';
+                  try { deviceName = localStorage.getItem('device_name') || ''; } catch (_) {}
+                  receiveSocket.emit("join-session", { sessionId, role, peerId, deviceName });
+                  
+                  // 🆕 NEW: Notify server that we're entering receive page (with small delay to ensure peer state is set)
+                  setTimeout(() => {
+                    receiveSocket.emit("enter-receive-page", { sessionId, peerId });
+                  }, 100);
+                });
+
+                                  receiveSocket.on("session-joined", (data) => {
+                    console.log("Receive page: Session joined successfully:", data);
+                    try { refreshRecent(); } catch (_) {}
+                    
+                    // Remove navigation token after successful connection
+                    try { sessionStorage.removeItem(`nav_token_recv_${sessionId}`); } catch (_) {}
+                  });
+
+                // Handle session join failures
+                receiveSocket.on("error", (error) => {
+                  console.error("Receive page: Socket error:", error);
+                  if (error.message && error.message.includes('Session not found')) {
+                    if (role === 'host') {
+                      // Host gets a button to go to main page
+                      document.body.innerHTML = `
+                        <div class="container">
+                          <div class="error">
+                            <h2>❌ Session Expired</h2>
+                            <p>This session has expired or no longer exists.</p>
+                            <p>Please scan the new QR code from the host to join the current session.</p>
+                            <div style="margin-top: 20px;">
+                              <button class="error-page-btn" onclick="window.location.href='/main.html?session=${sessionId}&role=host&peerId=${peerId}'">Go to Main</button>
+                            </div>
+                          </div>
+                        </div>
+                      `;
+                    } else {
+                      // Non-host users just see the error message, no button
+                      document.body.innerHTML = `
+                        <div class="container">
+                          <div class="error">
+                            <h2>❌ Session Expired</h2>
+                            <p>This session has expired or no longer exists.</p>
+                            <p>Please scan the new QR code from the host to join the current session.</p>
+                          </div>
+                        </div>
+                      `;
+                    }
+                  }
+                });
+
+                // Handle session not found from server
+                receiveSocket.on("session-exited", (data) => {
+                  console.log("Receive page: Session exited by server:", data);
+                  if (role === 'host') {
+                    // Host gets a button to go to main page
+                    document.body.innerHTML = `
+                      <div class="container">
+                        <div class="error">
+                          <h2>❌ Session Ended</h2>
+                          <p>${data.message || 'This session has ended.'}</p>
+                          <p>Please scan the new QR code from the host to join the current session.</p>
+                          <div style="margin-top: 20px;">
+                            <button class="error-page-btn" onclick="window.location.href='/main.html?session=${sessionId}&role=host&peerId=${peerId}'">Go to Main</button>
+                          </div>
+                        </div>
+                      </div>
+                    `;
+                  } else {
+                    // Non-host users just see the error message, no button
+                    document.body.innerHTML = `
+                      <div class="container">
+                        <div class="error">
+                          <h2>❌ Session Ended</h2>
+                          <p>${data.message || 'This session has ended.'}</p>
+                          <p>Please scan the new QR code from the host to join the current session.</p>
+                        </div>
+                      </div>
+                    `;
+                  }
+                });
+
+                // Update recent received history via server-side push
+                receiveSocket.on('history-updated', () => { try { refreshRecent(); } catch (_) {} });
+                receiveSocket.on('recent-updated', () => { try { refreshRecent(); } catch (_) {} });
+
+                receiveSocket.on("file-offer", ({ file, senderId, senderName }) => {
+                  console.log("Receive page: File offer received:", file);
+                  offeredFile = file;
+                  showOffer(file, senderName);
+                });
+                
+                // Handle response timer events
+                receiveSocket.on("response-timer-started", ({ fileId, duration, totalReceivers }) => {
+                  if (offeredFile && offeredFile.id === fileId) {
+                    // Show the timer container
+                    const timerContainer = document.getElementById("response-timer");
+                    timerContainer.style.display = "block";
+                    
+                    // Set the total receivers count
+                    document.getElementById("total-receivers").textContent = totalReceivers;
+                    document.getElementById("response-count").textContent = "0";
+                    
+                    // Start the countdown
+                    let timeLeft = duration;
+                    document.getElementById("timer-count").textContent = timeLeft;
+                    
+                    // Clear any existing timer
+                    if (window.responseCountdown) clearInterval(window.responseCountdown);
+                    
+                    // Set up the countdown timer
+                    window.responseCountdown = setInterval(() => {
+                      timeLeft--;
+                      document.getElementById("timer-count").textContent = timeLeft;
+                      
+                      if (timeLeft <= 0) {
+                        clearInterval(window.responseCountdown);
+                        // Hide timer and any lingering accept/reject UI when time expires
+                        timerContainer.style.display = "none";
+                        try { document.getElementById('incoming-files').style.display = 'none'; } catch (_) {}
+                        try {
+                          const status = document.getElementById('status-message');
+                          status.style.display = 'block';
+                          status.innerHTML = '<h3>Waiting for files...</h3>';
+                        } catch (_) {}
+                      }
+                    }, 1000);
+                  }
+                });
+                
+                // Handle response count updates
+                receiveSocket.on("response-count-updated", ({ fileId, totalResponses, totalReceivers }) => {
+                  if (offeredFile && offeredFile.id === fileId) {
+                    document.getElementById("response-count").textContent = totalResponses;
+                    document.getElementById("total-receivers").textContent = totalReceivers;
+                    
+                    // If all receivers have responded, hide the timer
+                    if (totalResponses >= totalReceivers) {
+                      clearInterval(window.responseCountdown);
+                      document.getElementById("response-timer").style.display = "none";
+                    }
+                  }
+                });
+
+                receiveSocket.on("upload-started", () => {
+                  console.log("Receive page: Upload started");
+                  // Keep incoming files section visible during upload
+                  document.getElementById("status-message").style.display = "block";
+                  document.getElementById("status-message").innerHTML = "<h3>Sender uploading... please wait</h3>";
+                  const sp = document.getElementById('sender-progress');
+                  sp.style.display = 'block';
+                  sp.textContent = 'Preparing...';
+                });
+
+                receiveSocket.on('sender-progress', ({ fileId, loaded, total, speedBps, etaSeconds }) => {
+                  const sp = document.getElementById('sender-progress');
+                  if (!sp) return;
+                  const pct = total ? ((loaded/total)*100).toFixed(1) : '...';
+                  sp.textContent = `Sender uploading: ${pct}% • Speed: ${formatSpeed(speedBps)} • ETA: ${formatTime(etaSeconds)}`;
+                  lastObservedSpeed = speedBps;
+                });
+
+                receiveSocket.on("download-ready", ({ file, downloadUrl }) => {
+                  console.log("Receive page: Download ready:", file);
+                  // Hide any lingering response UI before starting download
+                  try { if (window.responseCountdown) clearInterval(window.responseCountdown); } catch (_) {}
+                  try { document.getElementById('response-timer').style.display = 'none'; } catch (_) {}
+                  try { document.getElementById('incoming-files').style.display = 'none'; } catch (_) {}
+                  // Hide sender speed/ETA once download is ready
+                  try { const sp = document.getElementById('sender-progress'); sp.style.display = 'none'; sp.textContent = ''; } catch (_) {}
+                  startStreamingDownload(file, downloadUrl);
+                  try { refreshRecent(); } catch (_) {}
+                });
+
+                // No back re-enable needed; Exit button always available
+
+                // If sender cancels or exits, return to main
+                receiveSocket.on('return-all-to-main', () => {
+                  // Clear timers and hide prompts on return
+                  try { if (window.responseCountdown) clearInterval(window.responseCountdown); } catch (_) {}
+                  try { document.getElementById('response-timer').style.display = 'none'; } catch (_) {}
+                  try { document.getElementById('incoming-files').style.display = 'none'; } catch (_) {}
+                  window.location.href = `/main.html?session=${sessionId}&role=${role}`;
+                });
+
+                receiveSocket.on('force-redirect-to-receive', () => {
+                  console.log('Receive page: Already on receive page, ignoring redirect');
+                  // We're already here, so just update status
+                  document.getElementById("status-message").innerHTML = "<h3>Preparing to receive file...</h3>";
+                });
+
+                // 🆕 NEW: Handle abandoned sender redirect
+                receiveSocket.on('redirect-to-main-due-to-abandoned-sender', (data) => {
+                  console.log('Receive page: Abandoned sender detected, redirecting to main page:', data);
+                  showNotification('The sender appears to have left. Redirecting to main page.', 'warning');
+                  
+                  // Notify server that we're leaving receive page
+                  if (receiveSocket && receiveSocket.connected) {
+                    receiveSocket.emit('leave-receive-page', { sessionId, peerId });
+                  }
+                  
+                  // Redirect to main page
+                  setTimeout(() => {
+                    window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+                  }, 1000);
+                });
+
+                // 🆕 NEW: Handle sender left send page redirect
+                receiveSocket.on('redirect-to-main-due-to-sender-left-send-page', (data) => {
+                  console.log('Receive page: Sender left send page, redirecting to main page:', data);
+                  showNotification('The sender has left the send page. Redirecting to main page.', 'info');
+                  
+                  // Notify server that we're leaving receive page
+                  if (receiveSocket && receiveSocket.connected) {
+                    receiveSocket.emit('leave-receive-page', { sessionId, peerId });
+                  }
+                  
+                  // Redirect to main page
+                  setTimeout(() => {
+                    window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+                  }, 1000);
+                });
+
+                // 🆕 NEW: Handle redirect back to receive page (already on receive page)
+                receiveSocket.on('redirect-back-to-receive', (data) => {
+                  console.log('Receive page: Already on receive page, ignoring redirect:', data);
+                  showNotification('You are already on the receive page.', 'info');
+                });
+
+                // 🆕 NEW: Handle automatic redirect to receive page when send button is locked
+                receiveSocket.on('auto-redirect-to-receive', (data) => {
+                  console.log('Receive page: Auto-redirecting to receive page due to send button lock:', data);
+                  showNotification('Someone is already sending files. You are now on the receive page.', 'info');
+                });
+
+                // 🆕 NEW: Handle send button locked notification
+                receiveSocket.on('send-button-locked', (data) => {
+                  console.log('Receive page: Send button locked:', data);
+                  showNotification('Send button is now locked. File transfer in progress.', 'info');
+                });
+
+                // 🆕 NEW: Handle send button unlocked notification
+                receiveSocket.on('send-button-unlocked', (data) => {
+                  console.log('Receive page: Send button unlocked:', data);
+                  showNotification('Send button is now unlocked. You can go to main page to send files.', 'info');
+                });
+
+                // 🆕 NEW: Handle redirect sender to main (receiver shouldn't get this, but just in case)
+                receiveSocket.on('redirect-sender-to-main-no-receivers', (data) => {
+                  console.log('Receive page: Ignoring redirect sender event (receiver is in receive page):', data);
+                });
+
+                // 🆕 NEW: Handle host navigation blocked (receiver shouldn't get this, but just in case)
+                receiveSocket.on('host-navigation-blocked', (data) => {
+                  console.log('Receive page: Ignoring host navigation blocked event (receiver is in receive page):', data);
+                });
+
+                // 🆕 NEW: Handle host navigation allowed (receiver shouldn't get this, but just in case)
+                receiveSocket.on('host-navigation-allowed', (data) => {
+                  console.log('Receive page: Ignoring host navigation allowed event (receiver is in receive page):', data);
+                });
+
+                // When a transfer is unlocked/cleared (e.g., sender proceeds or times out), hide timer and offer
+                receiveSocket.on('transfer-unlocked', () => {
+                  try { if (window.responseCountdown) clearInterval(window.responseCountdown); } catch (_) {}
+                  try { document.getElementById('response-timer').style.display = 'none'; } catch (_) {}
+                  try { document.getElementById('incoming-files').style.display = 'none'; } catch (_) {}
+                  try { const sp = document.getElementById('sender-progress'); sp.style.display = 'none'; sp.textContent = ''; } catch (_) {}
+                  try {
+                    const status = document.getElementById('status-message');
+                    status.style.display = 'block';
+                    status.innerHTML = '<h3>Waiting for files...</h3>';
+                  } catch (_) {}
+                  // If host is alone after receivers left, prompt host if this is the host role
+                  try {
+                    const myRole = getUrlParameter('role');
+                    if (myRole === 'host') {
+                      // ask backend for peers via a quick socket request or rely on peers-updated elsewhere
+                    }
+                  } catch (_) {}
+                });
+
+                // Old session ended by host (e.g., new session created). Inform user.
+                receiveSocket.on('session-ended', () => {
+                  alert('This session has ended. Please reconnect with the new QR.');
+                  try { window.close(); } catch (e) {}
+                });
+
+                receiveSocket.on("disconnect", () => {
+                  console.log("Receive page: Socket disconnected");
+                  // Show helpful message when disconnected
+                  const statusEl = document.getElementById('status-message');
+                  if (statusEl) {
+                    statusEl.innerHTML = '<h3>⚠️ Connection lost. Attempting to reconnect...</h3>';
+                  }
+                });
+              }
+
+    function showOffer(file, senderName) {
+      document.getElementById("status-message").style.display = "none";
+      document.getElementById("incoming-files").style.display = "block";
+      const c = document.getElementById("incoming-container");
+      c.innerHTML = `<div class="file-item"><div class="file-info"><strong>${escapeHtml(file.name)}</strong><div class="file-details"><span>${formatFileSize(file.size)}</span></div></div></div><p>From: ${escapeHtml(senderName)}</p>`;
+    }
+
+    document.getElementById("accept-btn").addEventListener("click", () => {
+      if (!offeredFile) return;
+      receiveSocket.emit("accept-file", { sessionId, fileId: offeredFile.id, receiverPeerId: peerId });
+      document.getElementById("status-message").textContent = "Accepted. Waiting for upload...";
+      document.getElementById("incoming-files").style.display = "none";
+      // Hide and stop the response timer after making a choice
+      try {
+        if (window.responseCountdown) clearInterval(window.responseCountdown);
+        document.getElementById('response-timer').style.display = 'none';
+      } catch (_) {}
+      // Exit remains available; no back control
+    });
+    document.getElementById("reject-btn").addEventListener("click", () => {
+      if (!offeredFile) return;
+      receiveSocket.emit("reject-file", { sessionId, fileId: offeredFile.id, receiverPeerId: peerId });
+      offeredFile = null;
+      document.getElementById("incoming-files").style.display = "none";
+      document.getElementById("status-message").style.display = "block";
+      document.getElementById("status-message").textContent = "Waiting for files...";
+      // Hide and stop the response timer after making a choice
+      try {
+        if (window.responseCountdown) clearInterval(window.responseCountdown);
+        document.getElementById('response-timer').style.display = 'none';
+      } catch (_) {}
+    });
+
+
+    function startStreamingDownload(fileMeta, url) {
+      console.log(`Starting download: ${fileMeta.name}`);
+      showNotification(`Starting download: ${fileMeta.name}`, "info");
+      
+      // Update UI to show current download
+      const statusEl = document.getElementById('status-message');
+      if (statusEl) {
+        statusEl.innerHTML = `<h3>Downloading: ${fileMeta.name}</h3>`;
+      }
+      
+      // Start the actual download immediately when dc=0
+      try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileMeta.name || '';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        
+        showNotification(`Download started for ${fileMeta.name}`, "success");
+        
+        // Exit remains available; no back control
+        
+      } catch (err) {
+        console.error('Download error:', err);
+        showNotification(`Download failed: ${fileMeta.name}`, "error");
+        setBackDisabled(false);
+      }
+    }
+    function confirmExit() {
+      if (confirm('Are you sure you want to exit this session?')) {
+        exitSession();
+      }
+    }
+
+    function exitSession() {
+      try {
+        if (receiveSocket && receiveSocket.connected) {
+          // 🆕 NEW: Notify server that we're leaving receive page
+          receiveSocket.emit('leave-receive-page', { sessionId, peerId });
+          
+          receiveSocket.emit('leave-session', { sessionId, peerId }, (resp) => {
+            try { receiveSocket.disconnect(); } catch (_) {}
+            try {
+              if (role === 'host') {
+                // Host goes to index with new session - keep device name for reuse
+                alert('Session ended. Redirecting to create new session...');
+                try { localStorage.setItem(`nav_hist_${sessionId}`, '0'); } catch (_) {}
+                window.location.href = '/?forceNew=1';
+              } else {
+                // Clear device name only for non-host users when exiting session
+                try { localStorage.removeItem('device_name'); } catch (_) {}
+                // Non-host goes directly to disconnected page
+                try { localStorage.setItem(`exited_${sessionId}`, '1'); } catch (_) {}
+                try { localStorage.setItem(`nav_hist_${sessionId}`, '0'); } catch (_) {}
+                window.location.href = `/disconnected.html?session=${sessionId}&role=${role}`;
+              }
+            } catch (_) {}
+          });
+          return;
+        }
+      } catch (_) {}
+      try { 
+        if (role === 'host') {
+          // Host goes to index with new session - keep device name for reuse
+          alert('Session ended. Redirecting to create new session...');
+          try { localStorage.setItem(`nav_hist_${sessionId}`, '0'); } catch (_) {}
+          window.location.href = '/?forceNew=1';
+        } else {
+          // Clear device name only for non-host users when exiting session
+          try { localStorage.removeItem('device_name'); } catch (_) {}
+          // Non-host goes directly to disconnected page
+          try { localStorage.setItem(`exited_${sessionId}`, '1'); } catch (_) {}
+          try { localStorage.setItem(`nav_hist_${sessionId}`, '0'); } catch (_) {}
+          window.location.href = `/disconnected.html?session=${sessionId}&role=${role}`;
+        }
+      } catch (_) {}
+    }
+
+    setupSocket();
+    
+    // 🆕 NEW: Browser back detection and cleanup
+    (function(){
+      console.log('🔒 Setting up browser back detection for receive page...');
+      
+      // Push current state to history
+      try {
+        window.history.pushState(null, null, window.location.href);
+        console.log('✅ History state pushed for receive page');
+      } catch (e) {
+        console.error('❌ Failed to push history state:', e);
+      }
+      
+      // Detect browser back navigation
+      function handleBackNavigation(event) {
+        console.log('🚫 Browser back detected on receive page!');
+        
+        // Notify server that we're leaving receive page (with retry logic)
+        if (receiveSocket && receiveSocket.connected) {
+          console.log('📥 Notifying server of browser back from receive page');
+          receiveSocket.emit('leave-receive-page', { sessionId, peerId });
+          
+          // Also emit a backup event in case the first one fails
+          setTimeout(() => {
+            if (receiveSocket && receiveSocket.connected) {
+              console.log('📥 Backup notification to server of browser back from receive page');
+              receiveSocket.emit('leave-receive-page', { sessionId, peerId });
+            }
+          }, 50);
+        } else {
+          console.log('⚠️ Socket not connected, cannot notify server of browser back');
+        }
+        
+        // Prevent the back navigation
+        event.preventDefault();
+        event.stopPropagation();
+        
+        // Push state again
+        try {
+          window.history.pushState(null, null, window.location.href);
+        } catch (e) {
+          console.error('❌ Failed to re-push history state:', e);
+        }
+        
+        // Show alert and redirect properly
+        alert('⚠️ Please use the "Go Back" button to leave the receive page properly.');
+        
+        // Redirect to main page properly
+        setTimeout(() => {
+          try { sessionStorage.setItem(`nav_history_${sessionId}`, '1'); } catch (_) {}
+          try { localStorage.setItem(`nav_hist_${sessionId}`, '1'); } catch (_) {}
+          window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+        }, 100);
+      }
+      
+      // Add popstate listener
+      window.addEventListener('popstate', handleBackNavigation, true);
+      console.log('✅ Browser back detection set up for receive page');
+      
+      // Also handle beforeunload (page close/refresh)
+      window.addEventListener('beforeunload', function(e) {
+        console.log('🚫 Page unload detected on receive page');
+        if (receiveSocket && receiveSocket.connected) {
+          receiveSocket.emit('leave-receive-page', { sessionId, peerId });
+        }
+      });
+      
+    })();
+  </script>
+</body>
+</html>

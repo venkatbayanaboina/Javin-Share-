@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FileShare - Main Menu</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body style="color: rgb(5 121 123 / 99%);">
+    <div class="container">
+        <div class="header">
+            <h1>🔗 Connected</h1>
+            <p>You are connected to the file sharing session</p>
+        </div>
+
+        <div class="main-section">
+            <div class="session-info" style="box-shadow: 0 8px 24px rgba(0,0,0,0.12);">
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">📱 Device Name:</span>
+                        <span id="deviceName">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">💻 Device Info:</span>
+                        <span id="deviceInfo">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">👤 Role:</span>
+                        <span id="userRole">Loading...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="devices-status" id="devicesStatus"> 
+                <strong>📱 Connected Devices:</strong> <span>Loading...</span>
+            </div>
+            
+            <div id="transfer-status" class="status-message status-success">Waiting for host to connect. Please wait...</div>
+            
+            <div id="response-timer" class="timer-container" style="display: none;">
+                <div class="timer-label">Waiting for responses: <span id="countdown">30</span>s</div>
+                <div class="response-count">Responses: <span id="response-count">0</span>/<span id="total-receivers">0</span></div>
+            </div>
+
+            <div class="action-buttons">
+                <button id="sendBtn" class="btn btn-primary btn-send">📤 Send Files</button>
+        <div id="sendLockStatus" class="send-lock-status" style="display: none;">
+            <span class="lock-icon">🔒</span>
+            <span class="lock-message">Send button is locked</span>
+        </div>
+        <div id="hostNavigationBlocked" class="host-navigation-blocked" style="display: none;">
+            <span class="lock-icon">🚫</span>
+            <span class="lock-message">Navigation blocked - Use Exit button to leave</span>
+        </div>
+                <button id="exitBtn" class="btn btn-exit">🚪 Exit Session</button>
+            </div>
+
+            <div class="receive-info">
+                <div style="display:flex; justify-content:center; align-items:center; height:10vh;">
+                    <p style="color:white; font-size:22px; text-align:center;">
+                        💡 Want to receive? Wait for someone to click send!
+                    </p>
+                </div>
+            </div>
+            
+            <div id="transfer-history" class="file-list" style="display: none;">
+                <h3>📋 Transfer History</h3>
+                <div id="history-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+    <script>
+        // Comprehensive client-side guard to prevent direct navigation
+        (function(){
+          console.log('🔒 Setting up back navigation blocking...');
+          
+          // Multiple layers of back navigation blocking
+          let backNavigationBlocked = false;
+          
+          // Layer 1: History manipulation
+          try {
+            window.history.pushState(null, null, window.location.href);
+            console.log('✅ History state pushed successfully');
+          } catch (e) {
+            console.error('❌ Failed to push history state:', e);
+          }
+          
+          // Layer 2: Popstate event listener
+          function blockBackNavigation(event) {
+            console.log('🚫 Back navigation attempt detected!');
+            console.log('Event:', event);
+            console.log('Current URL:', window.location.href);
+            
+            if (!backNavigationBlocked) {
+              backNavigationBlocked = true;
+              
+              // Prevent the navigation
+              event.preventDefault();
+              event.stopPropagation();
+              
+              // Push current state again
+              try {
+                window.history.pushState(null, null, window.location.href);
+                console.log('✅ History state re-pushed');
+              } catch (e) {
+                console.error('❌ Failed to re-push history state:', e);
+              }
+              
+              // 🆕 NEW: Emit leave-main-page event to backend for navigation blocking
+              if (mainSocket && mainSocket.connected && role === 'host') {
+                console.log('🚫 Emitting leave-main-page event to backend for host navigation blocking');
+                mainSocket.emit('leave-main-page', { sessionId, peerId });
+              }
+              
+              // Show alert
+              alert('⚠️ Back navigation is disabled for security reasons.\n\nPlease use the Exit button to leave the session.');
+              
+              // Reset flag after a delay
+              setTimeout(() => {
+                backNavigationBlocked = false;
+                console.log('🔄 Back navigation blocking reset');
+              }, 1000);
+            }
+          }
+          
+          // Add event listener
+          window.addEventListener('popstate', blockBackNavigation, true);
+          console.log('✅ Popstate event listener added');
+          
+          // Layer 3: Beforeunload event (for page close attempts)
+          window.addEventListener('beforeunload', function(e) {
+            console.log('🚫 Page close attempt detected');
+            
+            // 🆕 NEW: Emit leave-main-page event to backend for navigation blocking
+            if (mainSocket && mainSocket.connected && role === 'host') {
+              console.log('🚫 Emitting leave-main-page event to backend for host page close attempt');
+              mainSocket.emit('leave-main-page', { sessionId, peerId });
+            }
+            
+            // Don't block page close, just log it
+          });
+          
+          // Layer 4: Hashchange event (for hash-based navigation)
+          window.addEventListener('hashchange', function(e) {
+            console.log('🚫 Hash change detected:', e);
+            // Block hash changes that might be used for navigation
+            e.preventDefault();
+            e.stopPropagation();
+          });
+          
+          // Layer 5: Periodic history state reinforcement
+          setInterval(() => {
+            try {
+              if (window.location.href !== window.history.state?.url) {
+                console.log('🔄 Reinforcing history state...');
+                window.history.pushState({ url: window.location.href }, null, window.location.href);
+              }
+            } catch (e) {
+              console.error('❌ Failed to reinforce history state:', e);
+            }
+          }, 2000);
+          
+          // Layer 6: Mobile-specific blocking (touch events and gestures)
+          let touchStartX = 0;
+          let touchStartY = 0;
+          let touchEndX = 0;
+          let touchEndY = 0;
+          
+          // Block touch events that might be swipe gestures
+          document.addEventListener('touchstart', function(e) {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+            console.log('📱 Touch start:', touchStartX, touchStartY);
+          }, { passive: false });
+          
+          document.addEventListener('touchend', function(e) {
+            touchEndX = e.changedTouches[0].clientX;
+            touchEndY = e.changedTouches[0].clientY;
+            
+            const deltaX = touchEndX - touchStartX;
+            const deltaY = touchEndY - touchStartY;
+            
+            // Detect left swipe (back gesture)
+            if (deltaX < -50 && Math.abs(deltaY) < 100) {
+              console.log('🚫 Left swipe detected (back gesture)');
+              e.preventDefault();
+              e.stopPropagation();
+              
+              // 🆕 NEW: Emit leave-main-page event to backend for navigation blocking
+              if (mainSocket && mainSocket.connected && role === 'host') {
+                console.log('🚫 Emitting leave-main-page event to backend for host swipe blocking');
+                mainSocket.emit('leave-main-page', { sessionId, peerId });
+              }
+              
+              alert('⚠️ Back swipe gesture is disabled for security reasons.\n\nPlease use the Exit button to leave the session.');
+            }
+          }, { passive: false });
+          
+          // Layer 7: Block keyboard shortcuts
+          document.addEventListener('keydown', function(e) {
+            // Block Alt+Left (back), Alt+Right (forward), F5 (refresh)
+            if ((e.altKey && e.key === 'ArrowLeft') || 
+                (e.altKey && e.key === 'ArrowRight') ||
+                e.key === 'F5') {
+              console.log('🚫 Keyboard shortcut blocked:', e.key);
+              e.preventDefault();
+              e.stopPropagation();
+              alert('⚠️ This keyboard shortcut is disabled for security reasons.\n\nPlease use the Exit button to leave the session.');
+            }
+          });
+          
+          console.log('🔒 Back navigation blocking setup complete');
+          
+          try {
+            const sid = getUrlParameter('session');
+            const role = getUrlParameter('role');
+            
+            // If coming from a fresh QR->PIN join, consume rejoin flag and clear stale exit flag
+            try {
+              if (role === 'client' && sessionStorage.getItem(`rejoining_${sid}`) === '1') {
+                localStorage.removeItem(`exited_${sid}`);
+                sessionStorage.removeItem(`rejoining_${sid}`);
+              }
+            } catch (_) {}
+
+            // Validate required parameters
+            if (!sid || !role) {
+              document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Invalid Access</h2><p>Missing session or role information.</p><p>Please join through the proper flow.</p></div></div>';
+              throw new Error('Missing session or role');
+            }
+            
+            // Check for navigation token (for clients)
+            if (role === 'client') {
+              const mainToken = sessionStorage.getItem(`nav_token_main_${sid}`);
+              const sendToken = sessionStorage.getItem(`nav_token_send_${sid}`);
+              const recvToken = sessionStorage.getItem(`nav_token_recv_${sid}`);
+              
+              // Check if user is coming from a legitimate source
+              if (!mainToken && !sendToken && !recvToken) {
+                document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Unauthorized Navigation</h2><p>Please start from the proper flow.</p><p>Scan QR code → Enter PIN → Main page</p></div></div>';
+                throw new Error('Blocked direct navigation to main');
+              }
+              
+              // If coming from send page, validate the send token specifically
+              if (sendToken) {
+                // User is coming from send page - this is legitimate
+                console.log('User coming from send page - allowing access');
+                sessionStorage.removeItem(`nav_token_send_${sid}`);
+              } else if (mainToken) {
+                // User is coming from main page (refresh) - allow
+                console.log('User refreshing main page - allowing access');
+                sessionStorage.removeItem(`nav_token_main_${sid}`);
+              } else if (recvToken) {
+                // User is coming from receive page - allow
+                console.log('User coming from receive page - allowing access');
+                sessionStorage.removeItem(`nav_token_recv_${sid}`);
+              }
+              
+              // Set main token for future navigation
+              sessionStorage.setItem(`nav_token_main_${sid}`, 'valid');
+            }
+            
+            // For hosts, check if they have any valid tokens (legitimate host access)
+            if (role === 'host') {
+              const indexToken = sessionStorage.getItem(`nav_token_index_${sid}`);
+              const mainToken = sessionStorage.getItem(`nav_token_main_${sid}`);
+              const sendToken = sessionStorage.getItem(`nav_token_send_${sid}`);
+              const recvToken = sessionStorage.getItem(`nav_token_recv_${sid}`);
+              
+              if (!indexToken && !mainToken && !sendToken && !recvToken) {
+                document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Unauthorized Navigation</h2><p>Please start from the host index page.</p></div></div>';
+                throw new Error('Host not authorized');
+              }
+              
+              // Remove any existing tokens and set main token for future navigation
+              if (indexToken) sessionStorage.removeItem(`nav_token_index_${sid}`);
+              if (mainToken) sessionStorage.removeItem(`nav_token_main_${sid}`);
+              if (sendToken) sessionStorage.removeItem(`nav_token_send_${sid}`);
+              if (recvToken) sessionStorage.removeItem(`nav_token_recv_${sid}`);
+              
+              // Set main token for future navigation
+              sessionStorage.setItem(`nav_token_main_${sid}`, '1');
+            }
+            
+            // Check if user previously exited this session
+            if (localStorage.getItem(`exited_${sid}`) === '1') {
+              console.log('User previously exited this session, redirecting to appropriate page');
+              if (role === 'host') {
+                // Host goes to index page
+                window.location.href = '/';
+              } else {
+                // Client goes to disconnected page
+                window.location.href = `/disconnected.html?session=${sid}&role=${role}`;
+              }
+              return;
+            }
+            
+            // Validate session exists
+            fetch(`/api/session-details/${sid}`)
+              .then(res => {
+                if (!res.ok) {
+                  // Clear old session data
+                  try {
+                    localStorage.removeItem(`exited_${sid}`);
+                    localStorage.removeItem(`nav_hist_${sid}`);
+                    sessionStorage.removeItem(`nav_token_main_${sid}`);
+                    sessionStorage.removeItem(`nav_token_send_${sid}`);
+                    sessionStorage.removeItem(`nav_token_recv_${sid}`);
+                  } catch (_) {}
+                  
+                  if (role === 'host') {
+                    document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Session Not Found</h2><p>This session does not exist or has expired.</p><p>Please start a new session.</p><div style="margin-top: 20px;"><button class="error-page-btn" onclick="window.location.href=\'/\'">Go to Index</button></div></div></div>';
+                  } else {
+                    document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Session Not Found</h2><p>This session does not exist or has expired.</p><p>Please scan a new QR code.</p></div></div>';
+                  }
+                  throw new Error('Session not found');
+                }
+              })
+              .catch(err => {
+                if (err.message !== 'Session not found') {
+                  // Clear old session data
+                  try {
+                    localStorage.removeItem(`exited_${sid}`);
+                    localStorage.removeItem(`nav_hist_${sid}`);
+                    sessionStorage.removeItem(`nav_token_main_${sid}`);
+                    sessionStorage.removeItem(`nav_token_send_${sid}`);
+                    sessionStorage.removeItem(`nav_token_recv_${sid}`);
+                  } catch (_) {}
+                  
+                  if (role === 'host') {
+                    document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Invalid Session</h2><p>This session is not valid.</p><p>Please start a new session.</p><div style="margin-top: 20px;"><button class="error-page-btn" onclick="window.location.href=\'/\'">Go to Index</button></div></div></div>';
+                  } else {
+                    document.body.innerHTML = '<div class="container"><div class="error"><h2>❌ Invalid Session</h2><p>This session is not valid.</p><p>Please scan the QR code again.</p></div></div>';
+                  }
+                }
+                throw err;
+              });
+          } catch (e) { 
+            console.warn('Main page guard error:', e.message); 
+            return;
+          }
+        })();
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!window.FileShareUtils) {
+                document.body.innerHTML = `<div class='container'><div class='error'><h2>Critical Error</h2><p>Core script (script.js) failed to load. Please refresh the page.</p></div></div>`;
+                return;
+            }
+            
+            // Initially disable the send button until host is in main page
+            document.getElementById('sendBtn').disabled = true;
+            // Receive button is permanently disabled
+
+            const { getUrlParameter, getPeerId, showError, showNotification, escapeHtml, formatFileSize } = window.FileShareUtils;
+
+            const sessionId = getUrlParameter('session');
+            const role = getUrlParameter('role');
+            const peerId = getPeerId();
+            let deviceName = '';
+            try { deviceName = localStorage.getItem('device_name') || ''; } catch (_) {}
+            let mainSocket = null;
+            let hostInMainPage = false; // Flag to track if host is in main page
+
+            // Mark navigation history as 1 when entering main
+            try { if (sessionId) localStorage.setItem(`nav_hist_${sessionId}`, '1'); } catch (_) {}
+
+            if (!sessionId) {
+                return showError('No session ID found in the URL. Please start over.');
+            }
+
+            // Show device name from localStorage
+            deviceName = localStorage.getItem('device_name') || 'Unknown Device';
+            document.getElementById('deviceName').textContent = deviceName;
+            // Show device info (OS type)
+            const deviceInfo = getDeviceInfo();
+            const osIcon = deviceInfo.os === 'macos' ? '🍎' : deviceInfo.os === 'windows' ? '🪟' : deviceInfo.os === 'linux' ? '🐧' : deviceInfo.os === 'android' ? '🤖' : deviceInfo.os === 'ios' ? '📱' : '💻';
+            const typeIcon = deviceInfo.deviceType === 'mobile' ? '📱' : deviceInfo.deviceType === 'tablet' ? '📲' : '🖥️';
+            document.getElementById('deviceInfo').textContent = `${typeIcon} ${osIcon} ${deviceInfo.os.toUpperCase()}`;
+            document.getElementById('userRole').textContent = role === 'host' ? '🏠 Host' : '💻 Client';
+            
+         // Allow users to rejoin sessions they previously exited
+         // Clear the exited flag to allow reconnection
+         try {
+           localStorage.removeItem(`exited_${sessionId}`);
+         } catch (_) {}
+
+         // Replace the setupSocket function in main.html with this complete version:
+
+function setupSocket() {
+    mainSocket = io({ query: { page: 'main' } });
+
+    mainSocket.on('connect', () => {
+        console.log("Main page: Socket connected");
+        // Ensure send button is disabled until host is in main page
+        document.getElementById('sendBtn').disabled = true;
+        // Receive button is permanently disabled
+        mainSocket.emit('join-session', { sessionId, role, peerId, deviceName });
+        
+        // 🆕 NEW: Notify server that we're entering main page
+        mainSocket.emit('enter-main-page', { sessionId, peerId, role });
+    });
+
+    mainSocket.on('peers-updated', (peers) => {
+        console.log("Main page: Peers updated:", peers);
+        console.log("Current peerId:", peerId);
+        console.log("All peers:", peers.map(p => ({ peerId: p.peerId, role: p.role, isMainPage: p.isMainPage })));
+        
+        // Filter out disconnected peers
+        const activePeers = peers.filter(p => !p.isDisconnected);
+        const totalDevices = activePeers.length;
+        const otherPeers = activePeers.filter(p => p.peerId !== peerId);
+        const otherDeviceCount = otherPeers.length;
+        
+        console.log("Active peers:", activePeers.length);
+        console.log("Total devices:", totalDevices);
+        console.log("Other devices:", otherDeviceCount);
+        console.log("Other peers:", otherPeers.map(p => ({ peerId: p.peerId, role: p.role })));
+        
+        const statusSpan = document.getElementById('devicesStatus').querySelector('span');
+        statusSpan.textContent = `${totalDevices} device(s) total (${otherDeviceCount} other)`;
+        
+        // Check if host is in main page
+        const hostPeer = peers.find(p => p.role === 'host');
+        hostInMainPage = hostPeer !== undefined && hostPeer.isMainPage === true;
+        
+        // Update status message based on host presence
+        const transferStatus = document.getElementById('transfer-status');
+        if (hostInMainPage) {
+            transferStatus.textContent = 'Ready to send files. Receiving is automatic.';
+            // Only enable send button if host is in main page and there are other devices
+            document.getElementById('sendBtn').disabled = otherDeviceCount === 0;
+            // Receive button is permanently disabled
+            // If host is alone, prompt to shutdown or start new session
+            if (role === 'host' && otherDeviceCount === 0) {
+                // Double-check with backend to avoid transient false-alone state
+                setTimeout(async () => {
+                    try {
+                        const resp = await fetch(`/api/session-details/${sessionId}`);
+                        if (resp.ok) {
+                            const s = await resp.json();
+                            // Only prompt shutdown if there are truly no other peers (including clients)
+                            if ((s.peerCount || 0) <= 1) {
+                                console.log(`Host alone check: peerCount=${s.peerCount}, otherDeviceCount=${otherDeviceCount}`);
+                                if (!confirm('You are alone in this session. Do you want to shut down the server?')) {
+                                    window.location.href = '/';
+                                } else {
+                                    try { await fetch('/api/shutdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) }); } catch (_) {}
+                                }
+                            } else {
+                                console.log(`Host not alone: peerCount=${s.peerCount}, otherDeviceCount=${otherDeviceCount}`);
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Error checking session details:', err);
+                    }
+                }, 1000); // Increased delay to avoid race conditions
+            }
+            
+            // If user is alone (no other peers), show appropriate message
+            if (otherDeviceCount === 0) {
+                const transferStatus = document.getElementById('transfer-status');
+                if (role === 'host') {
+                    transferStatus.textContent = 'No other devices connected. Waiting for connections...';
+                } else {
+                    transferStatus.textContent = 'No other devices connected. The host may have left.';
+                }
+                // Disable send button when alone
+                document.getElementById('sendBtn').disabled = true;
+            }
+        } else {
+            transferStatus.textContent = 'Waiting for host to connect (30 seconds delay). Please wait...';
+            // Keep send button disabled if host is not in main page
+            document.getElementById('sendBtn').disabled = true;
+            // Receive button is permanently disabled
+        }
+    });
+
+    mainSocket.on('history-updated', (history) => {
+        updateTransferHistory(history);
+    });
+    
+    // Handle redirect when someone else wants to send
+    mainSocket.on('force-redirect-to-receive', () => {
+        console.log('Main page: Redirecting to receive page due to incoming transfer');
+        
+        // 🆕 NEW: Notify server that we're leaving main page
+        mainSocket.emit('leave-main-page', { sessionId, peerId });
+        
+        window.location.href = `/receive.html?session=${sessionId}&role=${role}&peerId=${peerId}&forced=true`;
+    });
+
+    // 🆕 NEW: Handle abandoned sender redirect
+    mainSocket.on('redirect-to-main-due-to-abandoned-sender', (data) => {
+        console.log('Main page: Abandoned sender detected, already on main page:', data);
+        showNotification('The sender appears to have left. You are already on the main page.', 'info');
+    });
+
+    // 🆕 NEW: Handle sender left send page redirect
+    mainSocket.on('redirect-to-main-due-to-sender-left-send-page', (data) => {
+        console.log('Main page: Sender left send page, already on main page:', data);
+        showNotification('The sender has left the send page. You are already on the main page.', 'info');
+    });
+
+    // 🆕 NEW: Handle redirect back to receive page
+    mainSocket.on('redirect-back-to-receive', (data) => {
+        console.log('Main page: Redirecting back to receive page:', data);
+        showNotification('The sender is still in the send page. Redirecting you back to receive.', 'info');
+        
+        // Redirect back to receive page
+        setTimeout(() => {
+            window.location.href = `/receive.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+        }, 1000);
+    });
+
+    // 🆕 NEW: Handle automatic redirect to receive page when send button is locked
+    mainSocket.on('auto-redirect-to-receive', (data) => {
+        console.log('Main page: Auto-redirecting to receive page due to send button lock:', data);
+        showNotification('Someone is already sending files. Redirecting you to the receive page.', 'info');
+        
+        // Redirect to receive page
+        setTimeout(() => {
+            window.location.href = `/receive.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+        }, 1000);
+    });
+
+    // 🆕 NEW: Handle send button locked notification
+    mainSocket.on('send-button-locked', (data) => {
+        console.log('Main page: Send button locked:', data);
+        showNotification('Send button is now locked. File transfer in progress.', 'info');
+        
+        // Disable send button on main page
+        const sendButton = document.getElementById('sendBtn');
+        if (sendButton) {
+            sendButton.disabled = true;
+            sendButton.textContent = '📤 Send (Locked)';
+            sendButton.title = 'File transfer in progress. Please wait.';
+        }
+        
+        // Show lock status indicator
+        const lockStatus = document.getElementById('sendLockStatus');
+        if (lockStatus) {
+            lockStatus.style.display = 'flex';
+            lockStatus.querySelector('.lock-message').textContent = `Send button locked by ${data.lockedBy || 'another user'}`;
+        }
+    });
+
+    // 🆕 NEW: Handle send button unlocked notification
+    mainSocket.on('send-button-unlocked', (data) => {
+        console.log('Main page: Send button unlocked:', data);
+        showNotification('Send button is now unlocked. You can start a new file transfer.', 'info');
+        
+        // Re-enable send button on main page
+        const sendButton = document.getElementById('sendBtn');
+        if (sendButton) {
+            sendButton.disabled = false;
+            sendButton.textContent = '📤 Send Files';
+            sendButton.title = 'Click to send files';
+        }
+        
+        // Hide lock status indicator
+        const lockStatus = document.getElementById('sendLockStatus');
+        if (lockStatus) {
+            lockStatus.style.display = 'none';
+        }
+    });
+
+    // 🆕 NEW: Handle redirect sender to main (main page shouldn't get this, but just in case)
+    mainSocket.on('redirect-sender-to-main-no-receivers', (data) => {
+        console.log('Main page: Ignoring redirect sender event (already on main page):', data);
+    });
+
+    // 🆕 NEW: Handle host navigation blocked
+    mainSocket.on('host-navigation-blocked', (data) => {
+        console.log('Main page: Host navigation blocked:', data);
+        
+        // Show warning notification
+        showNotification(data.message || 'You cannot leave the main page while others are connected.', 'warning');
+        
+        // Show navigation blocked indicator
+        const navBlockedIndicator = document.getElementById('hostNavigationBlocked');
+        if (navBlockedIndicator) {
+            navBlockedIndicator.style.display = 'flex';
+            navBlockedIndicator.querySelector('.lock-message').textContent = `Navigation blocked - ${data.connectedPeers || 0} user(s) connected`;
+        }
+        
+        // Prevent browser back navigation
+        if (role === 'host') {
+            // Add browser back button prevention
+            window.history.pushState(null, '', window.location.href);
+            window.addEventListener('popstate', function(e) {
+                e.preventDefault();
+                window.history.pushState(null, '', window.location.href);
+                showNotification('Browser back navigation is blocked. Please use the Exit button to leave the session.', 'warning');
+            });
+            
+            // Also prevent page unload
+            window.addEventListener('beforeunload', function(e) {
+                if (data.connectedPeers > 0) {
+                    e.preventDefault();
+                    e.returnValue = 'You have connected users. Please use the Exit button to leave the session.';
+                    return e.returnValue;
+                }
+            });
+        }
+    });
+
+    // 🆕 NEW: Handle host navigation allowed
+    mainSocket.on('host-navigation-allowed', (data) => {
+        console.log('Main page: Host navigation allowed:', data);
+        
+        // Show info notification
+        showNotification(data.message || 'No other users are connected. You can now leave the main page.', 'info');
+        
+        // Hide navigation blocked indicator
+        const navBlockedIndicator = document.getElementById('hostNavigationBlocked');
+        if (navBlockedIndicator) {
+            navBlockedIndicator.style.display = 'none';
+        }
+        
+        // Remove navigation blocking if host is allowed to leave
+        if (role === 'host') {
+            // Remove popstate listener
+            window.removeEventListener('popstate', arguments.callee);
+            
+            // Remove beforeunload listener
+            window.removeEventListener('beforeunload', arguments.callee);
+        }
+    });
+    
+    mainSocket.on('transfer-unlocked', () => {
+        console.log("Main page: Transfer unlocked");
+        const transferStatus = document.getElementById('transfer-status');
+        transferStatus.className = 'status-message status-success';
+        
+        // Hide response timer if it's visible
+        document.getElementById('response-timer').style.display = 'none';
+        
+        // Only enable send button if host is in main page
+        if (hostInMainPage) {
+            transferStatus.textContent = 'Ready to send files. Receiving is automatic.';
+            const sendButton = document.getElementById('sendBtn');
+            if (sendButton) {
+                sendButton.disabled = false;
+                sendButton.textContent = '📤 Send Files';
+                sendButton.title = 'Click to send files';
+            }
+            // Receive button is permanently disabled
+        } else {
+            transferStatus.textContent = 'Waiting for host to connect (30 seconds delay). Please wait...';
+            const sendButton = document.getElementById('sendBtn');
+            if (sendButton) {
+                sendButton.disabled = true;
+                sendButton.textContent = '📤 Send Files';
+                sendButton.title = 'Waiting for host to connect';
+            }
+            // Receive button is permanently disabled
+        }
+        
+        // Hide lock status indicator
+        const lockStatus = document.getElementById('sendLockStatus');
+        if (lockStatus) {
+            lockStatus.style.display = 'none';
+        }
+    });
+
+    // (Reverted) No host arrival countdown on main page
+
+    // If sender cancels or exits, return everyone to main
+    mainSocket.on('return-all-to-main', () => {
+        window.location.href = `/main.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+    });
+
+    // Old session ended by host (e.g., new session created). Inform user.
+    mainSocket.on('session-ended', () => {
+        alert('This session has ended. Please reconnect with the new QR.');
+        try { window.close(); } catch (e) {}
+    });
+    
+    // Handle response timer events
+    mainSocket.on('response-timer-started', (data) => {
+        console.log('Response timer started:', data);
+        const timerContainer = document.getElementById('response-timer');
+        const countdownElement = document.getElementById('countdown');
+        const responseCountElement = document.getElementById('response-count');
+        const totalReceiversElement = document.getElementById('total-receivers');
+        
+        // Set initial values (respect dynamic duration if provided)
+        countdownElement.textContent = String(data.duration || 30);
+        responseCountElement.textContent = '0';
+        totalReceiversElement.textContent = data.totalReceivers;
+        
+        // Show timer container
+        timerContainer.style.display = 'block';
+        
+        // Start countdown
+        if (window.responseTimerInterval) clearInterval(window.responseTimerInterval);
+        let secondsLeft = data.duration || 30;
+        const countdownInterval = setInterval(() => {
+            secondsLeft--;
+            countdownElement.textContent = secondsLeft;
+            
+            if (secondsLeft <= 0) {
+                clearInterval(countdownInterval);
+                // Timer will be hidden when we receive response-count-updated with all responses
+            }
+        }, 1000);
+        
+        // Store interval ID to clear it if needed
+        window.responseTimerInterval = countdownInterval;
+    });
+    
+    mainSocket.on('response-count-updated', (data) => {
+        console.log('Response count updated:', data);
+        const responseCountElement = document.getElementById('response-count');
+        responseCountElement.textContent = data.totalResponses;
+        
+        // If all receivers have responded, hide the timer
+        if (data.totalResponses >= data.totalReceivers) {
+            document.getElementById('response-timer').style.display = 'none';
+            
+            // Clear interval if it exists
+            if (window.responseTimerInterval) {
+                clearInterval(window.responseTimerInterval);
+                window.responseTimerInterval = null;
+            }
+        }
+    });
+
+    mainSocket.on("disconnect", () => {
+        console.log("Main page: Socket disconnected");
+    });
+
+
+    
+    // Handle session invalidation (when host creates new session)
+    mainSocket.on('session-invalidated', (data) => {
+        console.log('Session invalidated:', data);
+        alert('This session has been invalidated. The host has started a new session.\n\nPlease scan the new QR code to join.');
+        try { 
+            localStorage.setItem(`nav_hist_${sessionId}`, '0');
+            sessionStorage.removeItem(`nav_token_main_${sessionId}`);
+            sessionStorage.removeItem(`nav_token_send_${sessionId}`);
+            sessionStorage.removeItem(`nav_token_recv_${sessionId}`);
+        } catch (_) {}
+        
+        if (role === 'host') {
+            window.location.href = '/';
+        } else {
+            window.location.href = `/disconnected.html?session=${sessionId}&role=${role}`;
+        }
+    });
+    
+    // Handle peer removal (when peer is kicked or session ends)
+    mainSocket.on('peer-removed', (data) => {
+        console.log('Peer removed:', data);
+        const { removedPeerId, reason } = data;
+        
+        if (removedPeerId === peerId) {
+            // This user was removed
+            alert(`You have been removed from the session: ${reason || 'Unknown reason'}`);
+            try { 
+                localStorage.setItem(`nav_hist_${sessionId}`, '0');
+                sessionStorage.removeItem(`nav_token_main_${sessionId}`);
+                sessionStorage.removeItem(`nav_token_send_${sessionId}`);
+                sessionStorage.removeItem(`nav_token_recv_${sessionId}`);
+            } catch (_) {}
+            
+            if (role === 'host') {
+                window.location.href = '/';
+            } else {
+                window.location.href = `/disconnected.html?session=${sessionId}&role=${role}`;
+            }
+        } else {
+            // Another peer was removed, update UI
+            console.log(`Peer ${removedPeerId} was removed: ${reason}`);
+            // The peers-updated event will handle the count update
+        }
+    });
+
+    // Show shutdown message and attempt to close
+    mainSocket.on('server-shutdown', () => {
+        alert('Server is shutting down. This tab will attempt to close.');
+        try { window.close(); } catch (e) {}
+    });
+}
+          // Replace the setupEventListeners function in main.html with this:
+
+    function setupEventListeners() {
+        document.getElementById('sendBtn').addEventListener('click', () => {
+            // Check if host is in main page
+            if (!hostInMainPage) {
+                showNotification('Please wait for the host to connect (30 seconds delay).', 'warning');
+                return;
+            }
+            
+            if (mainSocket && mainSocket.connected) {
+                // First, try to acquire send lock
+                mainSocket.emit('request-send-lock', { sessionId, senderId: peerId }, (lockRes) => {
+                    if (lockRes && lockRes.ok) {
+                        // Prepare receivers then navigate
+                        mainSocket.emit('prepare-receivers', { sessionId, senderId: peerId }, () => {
+                            // 🆕 NEW: Notify server that we're leaving main page with reason for auto-redirect
+                            if (role === 'host') {
+                                mainSocket.emit('leave-main-page', { sessionId, peerId, reason: 'auto_redirect_to_send' });
+                            } else {
+                                mainSocket.emit('leave-main-page', { sessionId, peerId });
+                            }
+                            
+                            try { 
+                                sessionStorage.setItem(`nav_token_send_${sessionId}`, '1');
+                                sessionStorage.setItem(`allow_reload_send_${sessionId}`, '1');
+                                sessionStorage.setItem(`nav_history_${sessionId}`, '1');
+                            } catch (_) {}
+                            window.location.href = `/send.html?session=${sessionId}&role=${role}&peerId=${peerId}`;
+                        });
+                    } else if (lockRes && lockRes.reason === 'host_not_ready') {
+                        // Host is not in main page yet
+                        showNotification(lockRes.message || 'Please wait for the host to connect (30 seconds delay).', 'warning');
+                    } else if (lockRes && lockRes.reason === 'send_page_occupied') {
+                        // 🆕 ENHANCED: Show specific lock denial reason
+                        if (lockRes.autoRedirect) {
+                            showNotification('Someone is already sending files. You will be redirected to receive page.', 'info');
+                        } else {
+                            showNotification('Someone is currently sending files. Please wait for them to finish.', 'warning');
+                        }
+                    } else if (lockRes && lockRes.reason === 'locked') {
+                        showNotification(`Another file transfer is already in progress by ${lockRes.currentSender || 'another user'}. Please wait.`, 'warning');
+                    } else {
+                        showNotification(lockRes.message || 'Send button is locked. Please wait.', 'warning');
+                    }
+                });
+            } else {
+                showNotification('Not connected. Please wait...', 'warning');
+            }
+        });
+        // Receive button is disabled - users are redirected automatically when files are offered
+        // No click handler needed since the button is disabled
+        
+        document.getElementById('exitBtn').addEventListener('click', () => {
+            if (!confirm('Are you sure you want to exit the session?')) return;
+            
+            if (role === 'client') {
+                // Clear device name only for clients when exiting session
+                try { localStorage.removeItem('device_name'); } catch (_) {}
+                // Don't set exited flag - allow reconnection to same session
+                try { localStorage.setItem(`nav_hist_${sessionId}`, '0'); } catch (_) {}
+                if (mainSocket && mainSocket.connected) {
+                    // 🆕 NEW: Notify server that we're leaving main page
+                    mainSocket.emit('leave-main-page', { sessionId, peerId });
+                    
+                    mainSocket.emit('leave-session', { sessionId, peerId }, () => {
+                        try { mainSocket.disconnect(); } catch (_) {}
+                        // Redirect client to disconnected page
+                        window.location.href = `/disconnected.html?session=${sessionId}&role=${role}`;
+                    });
+                } else {
+                    // Redirect client to disconnected page
+                    window.location.href = `/disconnected.html?session=${sessionId}&role=${role}`;
+                }
+            } else {
+                // Host exits to index page and creates NEW session
+                if (mainSocket) {
+                    // 🆕 NEW: Notify server that we're leaving main page with exit reason
+                    mainSocket.emit('leave-main-page', { sessionId, peerId, reason: 'host_exit_session' });
+                    try { mainSocket.disconnect(); } catch (_) {}
+                }
+                try { localStorage.setItem(`nav_hist_${sessionId}`, '0'); } catch (_) {}
+                // Host keeps device name for reuse but creates fresh session
+                window.location.href = '/?forceNew=1';
+            }
+        });
+        
+    }
+
+            function updateTransferHistory(history) {
+                const historyDiv = document.getElementById('transfer-history');
+                const contentDiv = document.getElementById('history-content');
+                if (!history || history.length === 0) {
+                    historyDiv.style.display = 'none';
+                    return;
+                }
+                // Show only items I sent or I personally received
+                const myItems = history.filter(item => item.sender === peerId || (item.recipients || []).includes(peerId));
+                if (myItems.length === 0) {
+                    historyDiv.style.display = 'none';
+                    return;
+                }
+                historyDiv.style.display = 'block';
+                contentDiv.innerHTML = myItems.map(item => `
+                    <div class="history-item">
+                        <div class="history-info">
+                            <strong>${escapeHtml(item.fileName)}</strong> <span style="opacity:.7;">(${item.status || 'pending'})</span>
+                            <div class="history-details">
+                                <span>${item.sender === peerId ? 'Sent' : 'From'}: ${escapeHtml(item.sender ? item.sender.substring(0,6) : 'Unknown')}</span>
+                                <span>Size: ${formatFileSize(item.fileSize)}</span>
+                                ${item.sender === peerId ? `<span>Recipients: ${(item.recipients||[]).map(r=>escapeHtml(r.substring(0,6))).join(', ')||'—'}</span>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            setupSocket();
+            setupEventListeners();
+            
+
+        });
+    </script>
+</body>
+</html>
