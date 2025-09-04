@@ -24,13 +24,23 @@ echo => Device IP detected: %DEVICE_IP%
 echo => Server URL: %URL%
 echo.
 
-:: Elevate if not admin
-openfiles >nul 2>&1
+:: Check if running as admin (simplified check)
+net session >nul 2>&1
 if %errorlevel% NEQ 0 (
-  echo => Requesting administrator privileges...
-  powershell -Command "Start-Process -Verb RunAs cmd -ArgumentList '/c ""%~f0""'"
-  exit /b
+  echo ========================================
+  echo    ADMINISTRATOR PRIVILEGES REQUIRED
+  echo ========================================
+  echo => This setup requires administrator privileges for:
+  echo => - Installing SSL certificates
+  echo => - Trusting certificates in Windows
+  echo.
+  echo => TO FIX: Right-click setup.bat and select 'Run as administrator'
+  echo.
+  echo => Press any key to exit...
+  pause >nul
+  exit /b 1
 )
+echo => ✓ Running with administrator privileges
 
 echo => Installing backend dependencies...
 pushd "%BACKEND_DIR%"
