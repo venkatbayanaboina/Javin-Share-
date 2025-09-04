@@ -16,14 +16,18 @@ if "%DEVICE_IP%"=="127.0.0.1" set DEVICE_IP=localhost
 
 set URL=https://%DEVICE_IP%:%PORT%
 
+echo ========================================
+echo    JAVIN FileShare - Complete Setup
+echo ========================================
+echo.
 echo => Device IP detected: %DEVICE_IP%
-echo => Will open: %URL%
+echo => Server URL: %URL%
 echo.
 
 :: Elevate if not admin
 openfiles >nul 2>&1
 if %errorlevel% NEQ 0 (
-  echo Requesting administrator privileges...
+  echo => Requesting administrator privileges...
   powershell -Command "Start-Process -Verb RunAs cmd -ArgumentList '/c ""%~f0""'"
   exit /b
 )
@@ -79,38 +83,28 @@ if exist "%BACKEND_DIR%\certs\cert.pem" (
   certutil -addstore -f "Root" "%BACKEND_DIR%\certs\cert.pem" >nul 2>&1
 )
 
-echo => Starting server (https) on %URL% ...
-echo => Server will start in a new window...
-echo => Waiting for server to be ready...
+echo.
+echo ========================================
+echo    Starting FileShare Server
+echo ========================================
+echo => Server URL: %URL%
+echo => Opening browser in 3 seconds...
+echo => Press Ctrl+C to stop the server
 echo.
 
-start "fileshare-backend" cmd /c "cd /d %BACKEND_DIR% && node server.js && pause"
-
-echo => Waiting for server to start (this may take a few seconds)...
-timeout /t 5 /nobreak >nul
-
-echo => Testing server connection...
-:test_connection
-curl -k -s %URL% >nul 2>&1
-if %errorlevel% neq 0 (
-    echo => Server not ready yet, waiting...
-    timeout /t 2 /nobreak >nul
-    goto test_connection
-)
-
-echo => Server is ready! Opening %URL% in your default browser...
+:: Open browser after 3 seconds
+timeout /t 3 /nobreak >nul
 start "" "%URL%"
 
+echo => Starting server...
+echo => Server is now running! Check your browser.
+echo => This window will stay open to show server status.
+echo => Press Ctrl+C to stop the server.
 echo.
-echo => ✅ FileShare is now running!
-echo => ✅ Server window: Check the 'fileshare-backend' window for status
-echo => ✅ Browser: Your file sharing app should be open
-echo => ✅ URL: %URL%
-echo.
-echo => Press any key to close this setup window...
-pause >nul
 
-popd
+:: Start the server (this keeps the window open)
+node server.js
+
 popd
 endlocal
 
