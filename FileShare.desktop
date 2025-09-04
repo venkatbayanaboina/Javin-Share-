@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=JAVIN FileShare
+Comment=Cross-platform file sharing application
+Exec=gnome-terminal -- bash -c "cd '%k' && chmod +x start.sh && ./start.sh; read -n 1 -s"
+Icon=applications-internet
+Terminal=false
+Categories=Network;FileTransfer;
+Path=/path/to/your/fileshare
