@@ -60,6 +60,8 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 echo => ✓ Dependencies installed successfully!
+echo => Press any key to continue with certificate generation...
+pause >nul
 
 if not exist "%BACKEND_DIR%\certs" mkdir "%BACKEND_DIR%\certs"
 
@@ -101,6 +103,8 @@ if not exist "%BACKEND_DIR%\certs\cert.pem" (
   %OPENSSL% req -x509 -newkey rsa:2048 -nodes -keyout "%BACKEND_DIR%\certs\key.pem" -out "%BACKEND_DIR%\certs\cert.pem" -days 365 -config "%BACKEND_DIR%\certs\cert.conf" -extensions v3_req
   del "%BACKEND_DIR%\certs\cert.conf"
   echo => ✓ Certificates generated successfully!
+  echo => Press any key to continue with certificate installation...
+  pause >nul
 )
 
 :: Trust the certificate if possible
@@ -138,6 +142,11 @@ if not exist server.js (
     exit /b 1
 )
 echo => Starting server from: %CD%
+echo.
+echo => Press any key to start the server...
+pause >nul
+
+echo => Starting FileShare server...
 node server.js
 
 popd
