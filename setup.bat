@@ -80,10 +80,20 @@ if exist "%BACKEND_DIR%\certs\cert.pem" (
 )
 
 echo => Starting server (https) on %URL% ...
-start "fileshare-backend" cmd /c node "%BACKEND_DIR%\server.js" ^& pause
+echo => Server will start in a new window...
+echo => This window will stay open to show server status
+echo.
+
+start "fileshare-backend" cmd /c "cd /d %BACKEND_DIR% && node server.js && pause"
 
 echo => Opening %URL% in your default browser
+timeout /t 3 /nobreak >nul
 start "" "%URL%"
+
+echo.
+echo => Server started! Check the new window for server status.
+echo => Press any key to close this window...
+pause >nul
 
 popd
 popd
