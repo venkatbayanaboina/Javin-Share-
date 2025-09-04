@@ -40,13 +40,16 @@ if not exist package.json (
     pause
     exit /b 1
 )
-call npm install --silent
+echo => Running npm install...
+call npm install
 if %errorlevel% neq 0 (
     echo => ERROR: npm install failed!
     echo => Please check if Node.js is installed correctly.
-    pause
+    echo => Press any key to close...
+    pause >nul
     exit /b 1
 )
+echo => ✓ Dependencies installed successfully!
 
 if not exist "%BACKEND_DIR%\certs" mkdir "%BACKEND_DIR%\certs"
 
@@ -87,12 +90,14 @@ if not exist "%BACKEND_DIR%\certs\cert.pem" (
   
   %OPENSSL% req -x509 -newkey rsa:2048 -nodes -keyout "%BACKEND_DIR%\certs\key.pem" -out "%BACKEND_DIR%\certs\cert.pem" -days 365 -config "%BACKEND_DIR%\certs\cert.conf" -extensions v3_req
   del "%BACKEND_DIR%\certs\cert.conf"
+  echo => ✓ Certificates generated successfully!
 )
 
 :: Trust the certificate if possible
 if exist "%BACKEND_DIR%\certs\cert.pem" (
   echo => Installing/Trusting local HTTPS certificate
   certutil -addstore -f "Root" "%BACKEND_DIR%\certs\cert.pem" >nul 2>&1
+  echo => ✓ Certificate installed successfully!
 )
 
 echo.
@@ -100,12 +105,12 @@ echo ========================================
 echo    Starting FileShare Server
 echo ========================================
 echo => Server URL: %URL%
-echo => Opening browser in 3 seconds...
+echo => All setup complete! Starting server...
 echo => Press Ctrl+C to stop the server
 echo.
 
-:: Open browser after 3 seconds
-timeout /t 3 /nobreak >nul
+:: Open browser after 2 seconds
+timeout /t 2 /nobreak >nul
 start "" "%URL%"
 
 echo => Starting server...
