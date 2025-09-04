@@ -89,14 +89,34 @@ echo    Starting FileShare Server
 echo ========================================
 echo => Server URL: %URL%
 echo => Press Ctrl+C to stop the server
-echo => Opening browser in 3 seconds...
 echo.
 
-timeout /t 3 /nobreak >nul
+echo => Starting server in background...
+start /B node server.js
+
+echo => Waiting for server to start...
+timeout /t 5 /nobreak >nul
+
+echo => Testing server connection...
+:test_connection
+curl -k -s %URL% >nul 2>&1
+if %errorlevel% neq 0 (
+    echo => Server not ready yet, waiting...
+    timeout /t 2 /nobreak >nul
+    goto test_connection
+)
+
+echo => ✅ Server is ready! Opening browser...
 start "" "%URL%"
 
-echo => Starting server...
-node server.js
+echo.
+echo => ✅ FileShare is now running!
+echo => ✅ URL: %URL%
+echo => ✅ Press any key to keep this window open...
+echo => ✅ Press Ctrl+C to stop the server
+echo.
+
+pause
 
 popd
 endlocal
