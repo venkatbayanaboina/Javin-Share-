@@ -16,36 +16,32 @@ describe('mDNS Service Tests', () => {
   test('initializes and responds to A record queries matching customHost', () => {
     const customHost = 'javin.share.abcd.local';
     const localIP = '192.168.1.200';
-    
+
     const server = startMdnsResponder(customHost, localIP);
     assert.ok(server);
-    
+
     try {
       let responseSent = null;
       server.respond = (response) => {
         responseSent = response;
       };
-      
+
       // 1. Simulate query for the correct host (with trailing dot)
       server.emit('query', {
-        questions: [
-          { name: 'javin.share.abcd.local.', type: 'A' }
-        ]
+        questions: [{ name: 'javin.share.abcd.local.', type: 'A' }],
       });
-      
+
       assert.ok(responseSent);
       assert.strictEqual(responseSent.answers[0].name, 'javin.share.abcd.local.');
       assert.strictEqual(responseSent.answers[0].type, 'A');
       assert.strictEqual(responseSent.answers[0].data, localIP);
-      
+
       // 2. Simulate query for correct host (without trailing dot)
       responseSent = null;
       server.emit('query', {
-        questions: [
-          { name: 'javin.share.abcd.local', type: 'A' }
-        ]
+        questions: [{ name: 'javin.share.abcd.local', type: 'A' }],
       });
-      
+
       assert.ok(responseSent);
       assert.strictEqual(responseSent.answers[0].name, 'javin.share.abcd.local');
       assert.strictEqual(responseSent.answers[0].type, 'A');
@@ -54,18 +50,14 @@ describe('mDNS Service Tests', () => {
       // 3. Simulate query for different query type (e.g. AAAA)
       responseSent = null;
       server.emit('query', {
-        questions: [
-          { name: 'javin.share.abcd.local.', type: 'AAAA' }
-        ]
+        questions: [{ name: 'javin.share.abcd.local.', type: 'AAAA' }],
       });
       assert.strictEqual(responseSent, null);
-      
+
       // 4. Simulate query for a completely different host
       responseSent = null;
       server.emit('query', {
-        questions: [
-          { name: 'other.local.', type: 'A' }
-        ]
+        questions: [{ name: 'other.local.', type: 'A' }],
       });
       assert.strictEqual(responseSent, null);
     } finally {

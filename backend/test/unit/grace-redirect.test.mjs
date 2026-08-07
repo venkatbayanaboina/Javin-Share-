@@ -15,7 +15,10 @@ function createTestSession(id = 'sess-test') {
     id,
     peers: new Map([
       ['host1', { peerId: 'host1', role: 'host', socketId: 'host-sock', isDisconnected: false }],
-      ['client1', { peerId: 'client1', role: 'client', socketId: 'client-sock', isDisconnected: false }],
+      [
+        'client1',
+        { peerId: 'client1', role: 'client', socketId: 'client-sock', isDisconnected: false },
+      ],
     ]),
     graceRedirectTimer: null,
     graceRedirectEndMs: null,
