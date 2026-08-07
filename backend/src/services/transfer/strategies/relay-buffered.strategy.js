@@ -2,11 +2,18 @@ import { PassThrough } from 'node:stream';
 import fs from 'node:fs';
 import path from 'node:path';
 import Busboy from 'busboy';
-import { BaseStreamStrategy, BaseStreamSession, chunkHighWaterMark } from './base-stream.strategy.js';
+import {
+  BaseStreamStrategy,
+  BaseStreamSession,
+  chunkHighWaterMark,
+} from './base-stream.strategy.js';
 import { config } from '../../../config.js';
 import { logger } from '../../../logger.js';
 import { contentDispositionAttachment, sanitizeFilename } from '../../../utils/filename.js';
-import { decrementPendingDownloads, progressReceiverDownloadQueue } from '../../download-queue.service.js';
+import {
+  decrementPendingDownloads,
+  progressReceiverDownloadQueue,
+} from '../../download-queue.service.js';
 
 class BufferedRelaySession extends BaseStreamSession {
   constructor(fileId, fileMetadata, expectedReceivers, senderSocketId) {
@@ -26,7 +33,12 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
   }
 
   initializeSession(fileId, fileMetadata, expectedReceivers, senderSocketId, session) {
-    const streamSession = new BufferedRelaySession(fileId, fileMetadata, expectedReceivers, senderSocketId);
+    const streamSession = new BufferedRelaySession(
+      fileId,
+      fileMetadata,
+      expectedReceivers,
+      senderSocketId,
+    );
     this.activeSessions.set(fileId, streamSession);
 
     logger.info(
@@ -53,7 +65,9 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
       }
 
       if (branch.writableLength > maxBufferSize) {
-        logger.warn(`⚠️ Receiver ${peerId} is stalled (buffer size ${branch.writableLength} bytes > limit). Dropping branch.`);
+        logger.warn(
+          `⚠️ Receiver ${peerId} is stalled (buffer size ${branch.writableLength} bytes > limit). Dropping branch.`,
+        );
         branch.destroy(new Error('Receiver stalled / buffer overflowed'));
         streamSession.branches.delete(peerId);
         continue;
@@ -75,7 +89,9 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
 
         const totalQueueBytes = catchingUp.queue.reduce((acc, c) => acc + c.length, 0);
         if (branch.writableLength + totalQueueBytes > maxBufferSize) {
-          logger.warn(`⚠️ Catching-up receiver ${peerId} is stalled (buffer size + queue ${branch.writableLength + totalQueueBytes} bytes > limit). Dropping branch.`);
+          logger.warn(
+            `⚠️ Catching-up receiver ${peerId} is stalled (buffer size + queue ${branch.writableLength + totalQueueBytes} bytes > limit). Dropping branch.`,
+          );
           branch.destroy(new Error('Receiver stalled / buffer overflowed'));
           streamSession.catchingUpReceivers.delete(peerId);
           continue;
@@ -135,11 +151,10 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
         const limit = config.transfer.spoolThresholdBytes || 256 * 1024 * 1024;
         if (!streamSession.spooled && bytesReceived > limit) {
           streamSession.spooled = true;
-          streamSession.tempPath = path.join(
-            config.uploadsDir,
-            `spool-${session.id}-${fileId}`
+          streamSession.tempPath = path.join(config.uploadsDir, `spool-${session.id}-${fileId}`);
+          logger.info(
+            `💾 Spooling threshold reached (${limit} bytes). Spilling buffer to disk: ${streamSession.tempPath}`,
           );
-          logger.info(`💾 Spooling threshold reached (${limit} bytes). Spilling buffer to disk: ${streamSession.tempPath}`);
           try {
             streamSession.writeStream = fs.createWriteStream(streamSession.tempPath);
             for (const memChunk of streamSession.memoryBuffer) {
@@ -162,17 +177,23 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
       });
 
       file.on('end', () => {
-        logger.info(`📥 Sender completed file chunks for buffered file ${fileId}. Bytes: ${bytesReceived}`);
+        logger.info(
+          `📥 Sender completed file chunks for buffered file ${fileId}. Bytes: ${bytesReceived}`,
+        );
       });
 
       file.on('error', (err) => {
         logger.error('Buffered upload chunk error:', err);
         this.destroyAllBranches(streamSession);
         if (streamSession.writeStream) {
-          try { streamSession.writeStream.destroy(); } catch (_) {}
+          try {
+            streamSession.writeStream.destroy();
+          } catch (_) {}
         }
         if (streamSession.tempPath && fs.existsSync(streamSession.tempPath)) {
-          try { fs.unlinkSync(streamSession.tempPath); } catch (_) {}
+          try {
+            fs.unlinkSync(streamSession.tempPath);
+          } catch (_) {}
         }
         this.activeSessions.delete(fileId);
         if (!res.headersSent) res.status(500).json({ error: 'Upload buffered streaming failed' });
@@ -245,8 +266,14 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
     if (!streamSession) {
       // Fallback: If upload completed and file was spooled on disk, serve it like a disk file
       const fileMetadata = session.activeFiles.get(fileId);
-      if (fileMetadata && fileMetadata.path !== 'in-memory-buffered' && fs.existsSync(fileMetadata.path)) {
-        logger.info(`📥 Lagging receiver ${receiverPeerId} downloading completed spooled file from disk`);
+      if (
+        fileMetadata &&
+        fileMetadata.path !== 'in-memory-buffered' &&
+        fs.existsSync(fileMetadata.path)
+      ) {
+        logger.info(
+          `📥 Lagging receiver ${receiverPeerId} downloading completed spooled file from disk`,
+        );
         return this.serveCompletedSpooledFile(req, res, session, fileMetadata, receiverPeerId);
       }
 
@@ -263,8 +290,14 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
 
     res.status(200);
     res.setHeader('Content-Type', streamSession.fileMetadata.type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', contentDispositionAttachment(streamSession.fileMetadata.name));
-    if (typeof streamSession.fileMetadata.size === 'number' && Number.isFinite(streamSession.fileMetadata.size)) {
+    res.setHeader(
+      'Content-Disposition',
+      contentDispositionAttachment(streamSession.fileMetadata.name),
+    );
+    if (
+      typeof streamSession.fileMetadata.size === 'number' &&
+      Number.isFinite(streamSession.fileMetadata.size)
+    ) {
       res.setHeader('Content-Length', streamSession.fileMetadata.size);
     }
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -277,15 +310,23 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
     // If spooled, feed existing spooled file chunks to this branch first (asynchronously via backpressured pipe)
     if (streamSession.spooled && streamSession.tempPath && fs.existsSync(streamSession.tempPath)) {
       const spooledBytesAtStart = streamSession.totalBytes;
-      streamSession.catchingUpReceivers.set(receiverPeerId, { branch, queue: [], spooledBytesAtStart });
+      streamSession.catchingUpReceivers.set(receiverPeerId, {
+        branch,
+        queue: [],
+        spooledBytesAtStart,
+      });
 
-      fileStream = fs.createReadStream(streamSession.tempPath, { end: Math.max(0, spooledBytesAtStart - 1) });
+      fileStream = fs.createReadStream(streamSession.tempPath, {
+        end: Math.max(0, spooledBytesAtStart - 1),
+      });
       fileStream.pipe(branch, { end: false });
 
       fileStream.on('end', () => {
         const catchingUp = streamSession.catchingUpReceivers.get(receiverPeerId);
         if (catchingUp) {
-          logger.info(`🔄 Lagging receiver ${receiverPeerId} caught up on spooled disk bytes. Flushing live queue.`);
+          logger.info(
+            `🔄 Lagging receiver ${receiverPeerId} caught up on spooled disk bytes. Flushing live queue.`,
+          );
           for (const chunk of catchingUp.queue) {
             if (!branch.destroyed && !branch.writableEnded) {
               branch.write(chunk);
@@ -320,19 +361,25 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
       streamSession.downloads.delete(receiverPeerId);
 
       if (fileStream) {
-        try { fileStream.destroy(); } catch (_) {}
+        try {
+          fileStream.destroy();
+        } catch (_) {}
       }
 
       const b = streamSession.branches.get(receiverPeerId);
       if (b && !b.destroyed) {
-        try { b.destroy(); } catch (_) {}
+        try {
+          b.destroy();
+        } catch (_) {}
       }
       streamSession.branches.delete(receiverPeerId);
 
       if (streamSession.catchingUpReceivers) {
         const catchingUp = streamSession.catchingUpReceivers.get(receiverPeerId);
         if (catchingUp && catchingUp.branch && !catchingUp.branch.destroyed) {
-          try { catchingUp.branch.destroy(); } catch (_) {}
+          try {
+            catchingUp.branch.destroy();
+          } catch (_) {}
         }
         streamSession.catchingUpReceivers.delete(receiverPeerId);
       }
@@ -350,14 +397,24 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
       logger.info(`Receiver ${receiverPeerId} download stream closed/aborted`);
       cleanupDownload();
 
-      if (streamSession.downloads.size === 0 && streamSession.uploadStarted && !streamSession.uploadCompleted) {
-        logger.warn(`⚠️ All active downloads closed during buffered upload of ${fileId}. Aborting.`);
+      if (
+        streamSession.downloads.size === 0 &&
+        streamSession.uploadStarted &&
+        !streamSession.uploadCompleted
+      ) {
+        logger.warn(
+          `⚠️ All active downloads closed during buffered upload of ${fileId}. Aborting.`,
+        );
         this.destroyAllBranches(streamSession);
         if (streamSession.writeStream) {
-          try { streamSession.writeStream.destroy(); } catch (_) {}
+          try {
+            streamSession.writeStream.destroy();
+          } catch (_) {}
         }
         if (streamSession.tempPath && fs.existsSync(streamSession.tempPath)) {
-          try { fs.unlinkSync(streamSession.tempPath); } catch (_) {}
+          try {
+            fs.unlinkSync(streamSession.tempPath);
+          } catch (_) {}
         }
         this.activeSessions.delete(fileId);
         session.activeTransfer = null;
@@ -398,7 +455,9 @@ export class RelayBufferedStrategy extends BaseStreamStrategy {
 
     res.on('finish', cleanup);
     res.on('close', () => {
-      try { readStream.destroy(); } catch (_) {}
+      try {
+        readStream.destroy();
+      } catch (_) {}
       cleanup();
     });
 

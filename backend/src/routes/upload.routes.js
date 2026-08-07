@@ -16,7 +16,9 @@ export function createUploadRouter() {
     try {
       const coordinator = getTransferCoordinator();
       const status = coordinator.getUploadStatus(sessionId, fileId);
-      logger.info(`ℹ️ Resumable upload query for ${fileId} in session ${sessionId}: ${status.bytesReceived} bytes received so far.`);
+      logger.info(
+        `ℹ️ Resumable upload query for ${fileId} in session ${sessionId}: ${status.bytesReceived} bytes received so far.`,
+      );
       res.json(status);
     } catch (err) {
       logger.error('Error retrieving upload status:', err);

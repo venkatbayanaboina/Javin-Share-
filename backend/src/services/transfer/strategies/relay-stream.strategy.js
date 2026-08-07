@@ -1,10 +1,17 @@
 import { PassThrough } from 'node:stream';
 import Busboy from 'busboy';
-import { BaseStreamStrategy, BaseStreamSession, chunkHighWaterMark } from './base-stream.strategy.js';
+import {
+  BaseStreamStrategy,
+  BaseStreamSession,
+  chunkHighWaterMark,
+} from './base-stream.strategy.js';
 import { config } from '../../../config.js';
 import { logger } from '../../../logger.js';
 import { contentDispositionAttachment, sanitizeFilename } from '../../../utils/filename.js';
-import { decrementPendingDownloads, progressReceiverDownloadQueue } from '../../download-queue.service.js';
+import {
+  decrementPendingDownloads,
+  progressReceiverDownloadQueue,
+} from '../../download-queue.service.js';
 
 export class RelayStreamStrategy extends BaseStreamStrategy {
   constructor(deps) {
@@ -12,7 +19,12 @@ export class RelayStreamStrategy extends BaseStreamStrategy {
   }
 
   initializeSession(fileId, fileMetadata, expectedReceivers, senderSocketId, session) {
-    const streamSession = new BaseStreamSession(fileId, fileMetadata, expectedReceivers, senderSocketId);
+    const streamSession = new BaseStreamSession(
+      fileId,
+      fileMetadata,
+      expectedReceivers,
+      senderSocketId,
+    );
     this.activeSessions.set(fileId, streamSession);
 
     logger.info(
@@ -55,7 +67,9 @@ export class RelayStreamStrategy extends BaseStreamStrategy {
       });
 
       file.on('end', () => {
-        logger.info(`📥 Sender completed file chunks for stream file ${fileId}. Bytes: ${bytesReceived}`);
+        logger.info(
+          `📥 Sender completed file chunks for stream file ${fileId}. Bytes: ${bytesReceived}`,
+        );
       });
 
       file.on('error', (err) => {
@@ -117,8 +131,14 @@ export class RelayStreamStrategy extends BaseStreamStrategy {
 
     res.status(200);
     res.setHeader('Content-Type', streamSession.fileMetadata.type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', contentDispositionAttachment(streamSession.fileMetadata.name));
-    if (typeof streamSession.fileMetadata.size === 'number' && Number.isFinite(streamSession.fileMetadata.size)) {
+    res.setHeader(
+      'Content-Disposition',
+      contentDispositionAttachment(streamSession.fileMetadata.name),
+    );
+    if (
+      typeof streamSession.fileMetadata.size === 'number' &&
+      Number.isFinite(streamSession.fileMetadata.size)
+    ) {
       res.setHeader('Content-Length', streamSession.fileMetadata.size);
     }
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -133,7 +153,9 @@ export class RelayStreamStrategy extends BaseStreamStrategy {
       streamSession.downloads.delete(receiverPeerId);
       const b = streamSession.branches.get(receiverPeerId);
       if (b && !b.destroyed) {
-        try { b.destroy(); } catch (_) {}
+        try {
+          b.destroy();
+        } catch (_) {}
       }
       streamSession.branches.delete(receiverPeerId);
       try {
@@ -151,8 +173,14 @@ export class RelayStreamStrategy extends BaseStreamStrategy {
       logger.info(`Receiver ${receiverPeerId} download stream closed/aborted`);
       cleanupDownload();
 
-      if (streamSession.downloads.size === 0 && streamSession.uploadStarted && !streamSession.uploadCompleted) {
-        logger.warn(`⚠️ All active downloads closed during stream upload of ${fileId}. Aborting stream.`);
+      if (
+        streamSession.downloads.size === 0 &&
+        streamSession.uploadStarted &&
+        !streamSession.uploadCompleted
+      ) {
+        logger.warn(
+          `⚠️ All active downloads closed during stream upload of ${fileId}. Aborting stream.`,
+        );
         this.destroyAllBranches(streamSession);
         this.activeSessions.delete(fileId);
         session.activeTransfer = null;

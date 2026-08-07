@@ -41,10 +41,22 @@ export class TransferCoordinatorService {
     const defaultStrategy = config.transfer.defaultStrategy;
     if (defaultStrategy === 'relay-buffered') {
       const bufferedStrategy = this.strategies.get('relay-buffered');
-      return bufferedStrategy.initializeSession(fileId, fileMetadata, expectedReceivers, senderSocketId, session);
+      return bufferedStrategy.initializeSession(
+        fileId,
+        fileMetadata,
+        expectedReceivers,
+        senderSocketId,
+        session,
+      );
     }
     const streamStrategy = this.strategies.get('relay-stream');
-    return streamStrategy.initializeSession(fileId, fileMetadata, expectedReceivers, senderSocketId, session);
+    return streamStrategy.initializeSession(
+      fileId,
+      fileMetadata,
+      expectedReceivers,
+      senderSocketId,
+      session,
+    );
   }
 
   /**
@@ -94,7 +106,9 @@ export class TransferCoordinatorService {
     }
 
     const strategy = this.resolveStrategy(fileId);
-    logger.info(`🎯 Delegating download for file ${fileId} using strategy: ${strategy.constructor.name}`);
+    logger.info(
+      `🎯 Delegating download for file ${fileId} using strategy: ${strategy.constructor.name}`,
+    );
     return strategy.handleDownload(req, res, session, fileId, receiverPeerId);
   }
 }

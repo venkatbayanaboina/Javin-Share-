@@ -20,7 +20,7 @@ export function startMdnsResponder(customHost, localIP, logger) {
           if (logger) {
             logger.info(`mDNS: Query received for ${q.name}, answering with IP ${localIP}`);
           }
-          
+
           mdnsInstance.respond({
             answers: [
               {
