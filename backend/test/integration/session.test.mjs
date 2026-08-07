@@ -101,9 +101,7 @@ describe('session API', () => {
     });
 
     it('redirects external client from host.html to join-pin.html', async () => {
-      const res = await request(app)
-        .get('/host.html')
-        .set('x-forwarded-for', '192.168.1.100');
+      const res = await request(app).get('/host.html').set('x-forwarded-for', '192.168.1.100');
       assert.equal(res.status, 302);
       assert.match(res.headers.location, /join-pin\.html/);
     });

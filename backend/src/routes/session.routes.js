@@ -4,7 +4,12 @@ import { logger } from '../logger.js';
 import { store } from '../state/store.js';
 import { peersOnPage, PeerPage } from '../services/peer-page.service.js';
 import { getGraceState } from '../services/grace-redirect.service.js';
-import { buildPinUrl, buildLocalUrl, createSession, invalidateSessionById } from '../services/session.service.js';
+import {
+  buildPinUrl,
+  buildLocalUrl,
+  createSession,
+  invalidateSessionById,
+} from '../services/session.service.js';
 import { getAllDeviceNames, getDeviceName } from '../services/device-names.service.js';
 import { assertHostPeer } from '../services/peer-auth.service.js';
 import {
@@ -199,9 +204,7 @@ export function createSessionRouter(deps) {
   router.get('/api/session-details/:sessionId', (req, res) => {
     const session = store.sessions.get(req.params.sessionId);
     if (session) {
-      const activePeers = Array.from(session.peers.values()).filter(
-        (p) => !p.isDisconnected,
-      );
+      const activePeers = Array.from(session.peers.values()).filter((p) => !p.isDisconnected);
       res.json({
         pinExpiry: session.pinExpiry,
         peerCount: activePeers.length,

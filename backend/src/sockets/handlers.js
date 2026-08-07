@@ -36,7 +36,9 @@ function startTransfer(session, fileId, io) {
   const fileMetadata = activeTransfer.file;
   if (!fileMetadata) return;
 
-  logger.info(`🔄 Initiating startTransfer helper for fileId: ${fileId}. Accepted count: ${acceptedCount}`);
+  logger.info(
+    `🔄 Initiating startTransfer helper for fileId: ${fileId}. Accepted count: ${acceptedCount}`,
+  );
 
   // Track pending downloads
   try {
@@ -46,7 +48,7 @@ function startTransfer(session, fileId, io) {
       size: fileMetadata.size,
       type: fileMetadata.type,
       path: 'relay',
-      pending: acceptedCount
+      pending: acceptedCount,
     };
     session.activeFiles.set(fileId, meta);
   } catch (e) {
@@ -71,20 +73,24 @@ function startTransfer(session, fileId, io) {
     }
   }
 
-  const expectedCount = activeTransfer.acceptedReceivers ? activeTransfer.acceptedReceivers.size : 0;
+  const expectedCount = activeTransfer.acceptedReceivers
+    ? activeTransfer.acceptedReceivers.size
+    : 0;
   const useStreamRelay = config.transfer.enableStreamRelay && expectedCount === 1;
 
   if (useStreamRelay) {
-    logger.info(`🌊 Single receiver (${expectedCount}) -> Dynamic stream relay initialized for file ${fileId}`);
+    logger.info(
+      `🌊 Single receiver (${expectedCount}) -> Dynamic stream relay initialized for file ${fileId}`,
+    );
     const coordinator = getTransferCoordinator();
-    
+
     // 1. Initialize stream session in coordinator
     coordinator.initializeStreamSession(
-      fileId, 
-      fileMetadata, 
-      activeTransfer.acceptedReceivers, 
-      sender.socketId, 
-      session
+      fileId,
+      fileMetadata,
+      activeTransfer.acceptedReceivers,
+      sender.socketId,
+      session,
     );
 
     // 2. Instruct accepted receivers to connect download stream immediately
@@ -96,17 +102,17 @@ function startTransfer(session, fileId, io) {
         io.to(receiver.socketId).emit('download-ready', {
           file: fileMetadata,
           downloadUrl,
-          stream: true
+          stream: true,
         });
       }
     }
   } else {
     // Traditional Disk-based relay
     logger.info(`💾 Initializing traditional disk-based transfer for file ${fileId}`);
-    
+
     // Send start-upload to sender
     io.to(sender.socketId).emit('start-upload', { fileId });
-    
+
     // Inform accepted receivers that upload started
     for (const receiverPeerId of activeTransfer.acceptedReceivers) {
       const receiver = session.peers.get(receiverPeerId);
@@ -122,11 +128,14 @@ function handleReceiverExit(session, peerId, io) {
   if (!activeTransfer) return;
 
   const isExpected = activeTransfer.receiversSnapshot.includes(peerId);
-  const hasResponded = activeTransfer.acceptedReceivers.has(peerId) || activeTransfer.rejectedReceivers.has(peerId);
+  const hasResponded =
+    activeTransfer.acceptedReceivers.has(peerId) || activeTransfer.rejectedReceivers.has(peerId);
 
   if (isExpected && !hasResponded) {
-    logger.info(`🔌 Receiver ${peerId} exited session/page during pending transfer for ${activeTransfer.fileId}. Registering auto-rejection.`);
-    
+    logger.info(
+      `🔌 Receiver ${peerId} exited session/page during pending transfer for ${activeTransfer.fileId}. Registering auto-rejection.`,
+    );
+
     // Register rejection on behalf of the exiting peer
     activeTransfer.rejectedReceivers.add(peerId);
     activeTransfer.totalResponses++;
@@ -160,7 +169,9 @@ function handleReceiverExit(session, peerId, io) {
 
     // Check if all receivers have responded now
     if (totalResponses >= totalReceivers) {
-      logger.info(`All responses received for ${fileId} after auto-rejection: ${totalResponses}/${totalReceivers}`);
+      logger.info(
+        `All responses received for ${fileId} after auto-rejection: ${totalResponses}/${totalReceivers}`,
+      );
 
       try {
         if (activeTransfer.responseTimer) {
@@ -359,7 +370,9 @@ export function registerSocketHandlers(io) {
         logger.info(`📤 Marked sender ${senderId} as on send page (prepare-receivers)`);
       }
 
-      const receivers = Array.from(session.peers.values()).filter((p) => p.peerId !== senderId && !p.isDisconnected);
+      const receivers = Array.from(session.peers.values()).filter(
+        (p) => p.peerId !== senderId && !p.isDisconnected,
+      );
       receivers.forEach((receiver) => {
         logger.info(`Preparing receiver ${receiver.peerId} → redirect to receive`);
         // Update receiver's page state immediately
@@ -454,7 +467,9 @@ export function registerSocketHandlers(io) {
       const hostPeer = Array.from(session.peers.values()).find((p) => p.role === 'host');
       const hostInMainPage = hostPeer && hostPeer.currentPage === 'main';
 
-      logger.info(`🔍 request-send-lock debug: senderId=${senderId}, hostPeerId=${hostPeer?.peerId}, senderId === hostPeerId: ${senderId === hostPeer?.peerId}, hostInMainPage=${hostInMainPage}`);
+      logger.info(
+        `🔍 request-send-lock debug: senderId=${senderId}, hostPeerId=${hostPeer?.peerId}, senderId === hostPeerId: ${senderId === hostPeer?.peerId}, hostInMainPage=${hostInMainPage}`,
+      );
 
       // If host is not in main page, but exists or grace window is active, proactively move host to main and proceed
       if (!hostInMainPage) {
@@ -630,7 +645,9 @@ export function registerSocketHandlers(io) {
       }
 
       // FIXED: Find all peers except the sender as potential receivers
-      const receivers = Array.from(session.peers.values()).filter((p) => p.peerId !== senderId && !p.isDisconnected);
+      const receivers = Array.from(session.peers.values()).filter(
+        (p) => p.peerId !== senderId && !p.isDisconnected,
+      );
       logger.info(
         `Available receivers:`,
         receivers.map((r) => `${r.peerId}(${r.role})`),
@@ -771,7 +788,9 @@ export function registerSocketHandlers(io) {
       io.in(sessionId).emit('history-updated', history);
 
       // FIXED: Offer to all peers except sender (regardless of role)
-      const receivers = Array.from(session.peers.values()).filter((p) => p.peerId !== senderId && !p.isDisconnected);
+      const receivers = Array.from(session.peers.values()).filter(
+        (p) => p.peerId !== senderId && !p.isDisconnected,
+      );
       logger.info(
         `Offering file to:`,
         receivers.map((r) => `${r.peerId}(${r.role})`),
@@ -1279,7 +1298,6 @@ export function registerSocketHandlers(io) {
         // 🆕 NEW: Emit peers-updated event to update peer count display
         const connectedPeers = Array.from(session.peers.values()).filter((p) => !p.isDisconnected);
         io.in(sessionId).emit('peers-updated', connectedPeers);
-
       }
     });
 

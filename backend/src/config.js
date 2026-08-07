@@ -18,7 +18,10 @@ if (fs.existsSync(envPath)) {
       if (idx > 0) {
         const key = trimmed.slice(0, idx).trim();
         let val = trimmed.slice(idx + 1).trim();
-        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        if (
+          (val.startsWith('"') && val.endsWith('"')) ||
+          (val.startsWith("'") && val.endsWith("'"))
+        ) {
           val = val.slice(1, -1);
         }
         if (process.env[key] === undefined) {
@@ -30,7 +33,6 @@ if (fs.existsSync(envPath)) {
     console.error('Error loading .env file:', err);
   }
 }
-
 
 export const config = {
   port: Number(process.env.PORT) || 4000,

@@ -19,7 +19,7 @@ describe('Transfer Optimization Integration Tests', () => {
     id: fileId,
     name: 'large_test.txt',
     size: 20,
-    type: 'text/plain'
+    type: 'text/plain',
   };
 
   const originalUploadsDir = config.uploadsDir;
@@ -30,10 +30,10 @@ describe('Transfer Optimization Integration Tests', () => {
     config.uploadsDir = testUploadsDir;
     ensureUploadsDir(testUploadsDir);
     cleanUploadsDir(testUploadsDir);
-    
+
     // Default to relay-disk for disk tests, we will flip to relay-stream in stream tests
     config.transfer.defaultStrategy = 'relay-disk';
-    
+
     ({ app, io } = createTestApp());
     ({ sessionId } = await createSession(io, true));
   });
@@ -58,8 +58,7 @@ describe('Transfer Optimization Integration Tests', () => {
       assert.equal(chunk1Res.body.bytesReceived, 5);
 
       // Check upload status query
-      const statusRes = await request(app)
-        .get(`/api/v1/upload/status/${sessionId}/${fileId}`);
+      const statusRes = await request(app).get(`/api/v1/upload/status/${sessionId}/${fileId}`);
       assert.equal(statusRes.status, 200);
       assert.equal(statusRes.body.bytesReceived, 5);
 
@@ -80,7 +79,7 @@ describe('Transfer Optimization Integration Tests', () => {
       assert.ok(meta);
       assert.equal(meta.name, 'large_test.txt');
       assert.equal(meta.size, 12);
-      
+
       const onDisk = fs.readFileSync(meta.path, 'utf8');
       assert.equal(onDisk, 'hello world!');
     });
@@ -156,7 +155,7 @@ describe('Transfer Optimization Integration Tests', () => {
         socketId: 'peer1-socket',
         role: 'receiver',
         currentPage: 'receive',
-        isDisconnected: false
+        isDisconnected: false,
       });
 
       // Initialize the stream session
@@ -165,7 +164,7 @@ describe('Transfer Optimization Integration Tests', () => {
         { id: fileId, name: 'stream_test.bin', size: 14, type: 'application/octet-stream' },
         ['peer1'],
         'sender-socket',
-        session
+        session,
       );
 
       // Listen on a random ephemeral port
@@ -173,7 +172,9 @@ describe('Transfer Optimization Integration Tests', () => {
       const port = server.address().port;
 
       // Async fetch /download - this sends the GET request immediately
-      const downloadPromise = fetch(`http://127.0.0.1:${port}/download/${sessionId}/${fileId}?receiver=peer1`);
+      const downloadPromise = fetch(
+        `http://127.0.0.1:${port}/download/${sessionId}/${fileId}?receiver=peer1`,
+      );
 
       // Poll until the receiver is registered in the stream session
       const streamStrategy = coordinator.strategies.get('relay-stream');
@@ -182,7 +183,7 @@ describe('Transfer Optimization Integration Tests', () => {
         if (streamSession && streamSession.connectedReceivers.has('peer1')) {
           break;
         }
-        await new Promise(resolve => setTimeout(resolve, 20));
+        await new Promise((resolve) => setTimeout(resolve, 20));
       }
 
       const payload = Buffer.from('stream payload');
@@ -195,15 +196,18 @@ describe('Transfer Optimization Integration Tests', () => {
         Buffer.from(`\r\n--${boundary}--\r\n`),
       ]);
 
-      const uploadRes = await fetch(`http://127.0.0.1:${port}/upload/${sessionId}?fileId=${fileId}`, {
-        method: 'POST',
-        headers: {
-          'X-File-Id': fileId,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': String(body.length),
+      const uploadRes = await fetch(
+        `http://127.0.0.1:${port}/upload/${sessionId}?fileId=${fileId}`,
+        {
+          method: 'POST',
+          headers: {
+            'X-File-Id': fileId,
+            'Content-Type': `multipart/form-data; boundary=${boundary}`,
+            'Content-Length': String(body.length),
+          },
+          body,
         },
-        body,
-      });
+      );
 
       assert.equal(uploadRes.status, 200);
       const uploadJson = await uploadRes.json();
@@ -220,7 +224,7 @@ describe('Transfer Optimization Integration Tests', () => {
       assert.equal(streamStrategy.activeSessions.has(fileId), false);
 
       // Close the server
-      await new Promise(resolve => server.close(resolve));
+      await new Promise((resolve) => server.close(resolve));
     });
 
     it('fans out uploaded bytes to multiple receivers', async () => {
@@ -503,7 +507,7 @@ describe('Transfer Optimization Integration Tests', () => {
       config.transfer.defaultStrategy = 'relay-buffered';
       config.transfer.enableStreamRelay = true;
       config.transfer.spoolThresholdBytes = 500; // Spill to disk quickly
-      config.transfer.streamRelayTimeoutMs = 50;  // Trigger upload quickly after timeout
+      config.transfer.streamRelayTimeoutMs = 50; // Trigger upload quickly after timeout
 
       const bufferedFileId = 'buffered-late-file';
       const coordinator = getTransferCoordinator();
@@ -543,7 +547,7 @@ describe('Transfer Optimization Integration Tests', () => {
 
       // 1. Connect first receiver peer1
       const downloadPromise1 = fetch(
-        `http://127.0.0.1:${port}/download/${sessionId}/${bufferedFileId}?receiver=peer1`
+        `http://127.0.0.1:${port}/download/${sessionId}/${bufferedFileId}?receiver=peer1`,
       );
 
       // Wait for peer1 to connect and the upload timeout to fire (which starts the upload)
@@ -560,7 +564,7 @@ describe('Transfer Optimization Integration Tests', () => {
       const http = await import('node:http');
       const boundary = '----javin-buffered-late';
       const header = Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="late.bin"\r\nContent-Type: application/octet-stream\r\n\r\n`
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="late.bin"\r\nContent-Type: application/octet-stream\r\n\r\n`,
       );
       const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
 
@@ -572,8 +576,8 @@ describe('Transfer Optimization Integration Tests', () => {
         headers: {
           'X-File-Id': bufferedFileId,
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Transfer-Encoding': 'chunked'
-        }
+          'Transfer-Encoding': 'chunked',
+        },
       });
 
       req.write(header);
@@ -585,7 +589,7 @@ describe('Transfer Optimization Integration Tests', () => {
 
       // 3. Connect late receiver peer2
       const downloadPromise2 = fetch(
-        `http://127.0.0.1:${port}/download/${sessionId}/${bufferedFileId}?receiver=peer2`
+        `http://127.0.0.1:${port}/download/${sessionId}/${bufferedFileId}?receiver=peer2`,
       );
 
       // Wait for peer2 connection
@@ -670,7 +674,7 @@ describe('Transfer Optimization Integration Tests', () => {
       const streamStrategy = coordinator.strategies.get('relay-buffered');
 
       const downloadPromise = fetch(
-        `http://127.0.0.1:${port}/download/${sessionId}/${bufferedFileId}?receiver=peer1`
+        `http://127.0.0.1:${port}/download/${sessionId}/${bufferedFileId}?receiver=peer1`,
       );
 
       // Wait for receiver to connect
@@ -693,18 +697,15 @@ describe('Transfer Optimization Integration Tests', () => {
         Buffer.from(`\r\n--${boundary}--\r\n`),
       ]);
 
-      await fetch(
-        `http://127.0.0.1:${port}/upload/${sessionId}?fileId=${bufferedFileId}`,
-        {
-          method: 'POST',
-          headers: {
-            'X-File-Id': bufferedFileId,
-            'Content-Type': `multipart/form-data; boundary=${boundary}`,
-            'Content-Length': String(body.length),
-          },
-          body,
+      await fetch(`http://127.0.0.1:${port}/upload/${sessionId}?fileId=${bufferedFileId}`, {
+        method: 'POST',
+        headers: {
+          'X-File-Id': bufferedFileId,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': String(body.length),
         },
-      );
+        body,
+      });
 
       try {
         const downloadRes = await downloadPromise;
@@ -715,7 +716,10 @@ describe('Transfer Optimization Integration Tests', () => {
         } catch (_) {
           errorCaught = true;
         }
-        assert.ok(errorCaught || downloadRes.status !== 200, 'Download stream should have failed/aborted due to stall destruction');
+        assert.ok(
+          errorCaught || downloadRes.status !== 200,
+          'Download stream should have failed/aborted due to stall destruction',
+        );
       } finally {
         session.activeFiles.delete(bufferedFileId);
         await new Promise((resolve) => server.close(resolve));
@@ -723,4 +727,3 @@ describe('Transfer Optimization Integration Tests', () => {
     });
   });
 });
-
